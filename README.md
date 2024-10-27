@@ -1,4 +1,4 @@
-# ChatGPT-PreMod
+# ChatGPT-PreMod (Note: Oct 26 Update: DeMod was just updated with this functionality, I'll be going inactive on this now)
 Hides moderation visual effects. _Prevents_ the deletion of streaming response after it fully comes in (we can no longer automatically restore previously removed messages, and even the ones we prevent from deleted are lost on reload).
 
 To install, have TamperMonkey extension installed and go here: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
