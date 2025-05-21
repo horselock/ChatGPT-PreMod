@@ -8,8 +8,8 @@
 // @downloadURL  https://github.com/rayzorium/ChatGPT-PreMod/raw/main/ChatGPT%20PreMod.user.js
 // @updateURL    https://github.com/rayzorium/ChatGPT-PreMod/raw/main/ChatGPT%20PreMod.user.js
 // @run-at       document-start
-// @grant        GM.setValue
 // @grant        GM.getValue
+// @grant        GM.setValue
 // ==/UserScript==
 
 'use strict';
@@ -19,9 +19,7 @@ function clearFlagsInObject(obj) {
     let anyChangeMade = false;
     if (!obj || typeof obj !== 'object') return { wasBlockedOriginal, anyChangeMade };
 
-    const target = (obj.moderation_response && typeof obj.moderation_response === 'object')
-                   ? obj.moderation_response
-                   : obj;
+    const target = obj.moderation_response ? obj.moderation_response : obj;
 
     if (target.blocked === true) {
         wasBlockedOriginal = true;
@@ -35,9 +33,11 @@ function clearFlagsInObject(obj) {
     return { wasBlockedOriginal, anyChangeMade };
 }
 
-const originalFetch = window.fetch;
-window.fetch = async (...args) => {
-    const originalResponse = await originalFetch(...args);
+const pageGlobal = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+const originalFetch = pageGlobal.fetch;
+pageGlobal.fetch = async (...args) => {
+    const originalResponse = await originalFetch.call(pageGlobal, ...args);
     const contentType = originalResponse.headers.get('content-type') || '';
 
     if (contentType.includes('text/event-stream')) {
@@ -57,8 +57,11 @@ window.fetch = async (...args) => {
                     const { done, value } = await reader.read();
                     if (done) {
                         if (currentMessageId && accumulatedContent) {
-                            try { await GM.setValue(`msg_${currentMessageId}`, accumulatedContent);
-                            } catch (e) { console.error("ChatGPT PreMod: Error saving with GM.setValue", e); }
+                            try {
+                                await GM.setValue(`msg_${currentMessageId}`, accumulatedContent);
+                            } catch (e) {
+                                console.error("ChatGPT PreMod: Error saving to GM storage", e);
+                            }
                         }
                         controller.close();
                         break;
@@ -100,7 +103,7 @@ window.fetch = async (...args) => {
                     if (rawChunkIdMatch && rawChunkIdMatch[1]) { currentMessageId = rawChunkIdMatch[1]; }
 
                     if (chunkHadBlockedEvent) {
-                        window.alert("Latest message BLOCKED, but Premod prevented removal.\n\nIf Your REQUEST (not the response) triggered this response will not stream and may never show. However, you can ask ChatGPT to repeat its response which will stream.\n\nNote too any REQUEST triggers may lead to a ban. False positives are very common, but moderation THINKS it saw sexual/minors or self-harm/instructions.");
+                        window.alert("Latest message BLOCKED, but Premod prevented removal and saved.\n\nIf Your REQUEST (not the response) triggered this response will not stream and may never show. However, you can ask ChatGPT to repeat its response which will stream.\n\nNote too any REQUEST triggers may lead to a ban. False positives are very common, but moderation THINKS it saw sexual/minors or self-harm/instructions.");
                     }
                     controller.enqueue(enc.encode(processedChunkLines.join('\n')));
                 }
@@ -128,10 +131,10 @@ window.fetch = async (...args) => {
             }
 
             if (jsonData.mapping && typeof jsonData.mapping === 'object') {
-                idsToRestore.forEach(idToRestore => {
+                for (const idToRestore of idsToRestore) {
                     const messageEntry = jsonData.mapping[idToRestore];
-                    if (messageEntry?.message) { // Check if there's a message object
-                        const storedContent = await GM.getValue(`msg_${idToRestore}`, null);
+                    if (messageEntry?.message) {
+                        const storedContent = await GM.getValue(`msg_${idToRestore}`);
                         if (storedContent) {
                             const messageNode = messageEntry.message;
                             if (!messageNode.content) {
@@ -143,7 +146,7 @@ window.fetch = async (...args) => {
                             modified = true;
                         }
                     }
-                });
+                }
             }
 
             return new Response(modified ? JSON.stringify(jsonData) : originalText, { headers: originalResponse.headers, status: originalResponse.status, statusText: originalResponse.statusText});
