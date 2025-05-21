@@ -1,5 +1,5 @@
 # ChatGPT-PreMod
-Hides moderation visual effects. _Prevents_ the deletion of streaming response after it fully comes in and saves them locally. Thanks to lugia19 for the idea! He wrote one too but it broke with a random update, so now I'm just doing my own take
+Hides moderation visual effects. _Prevents_ the deletion of streaming response after they fully comes in and saves them locally. And injects them back into your chats when loading them! Thanks to lugia19 for the idea of how to inject them! He wrote one too (Unmod) but it broke with a random website update, so now I'm just doing my own take
 
 To install, have TamperMonkey extension installed and go here: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
