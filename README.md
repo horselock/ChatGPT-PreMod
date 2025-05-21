@@ -1,5 +1,5 @@
 # ChatGPT-PreMod
-#### Note: Demod has been updated to work again, but seems brittle to front end changes, OpenAI will just do tiny updates that break things. I try to keep things super simple, this will stay working more reliably. 
+#### Note: Demod has been updated to work again, but seems brittle to front end changes, OpenAI will just do tiny updates that break things totally by accident. I try to keep things super simple, this will stay working more reliably. 
 Hides moderation visual effects. _Prevents_ the deletion of streaming response after it fully comes in (we can no longer automatically restore previously removed messages, and even the ones we prevent from deleted are lost on reload).
 
 To install, have TamperMonkey extension installed and go here: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
