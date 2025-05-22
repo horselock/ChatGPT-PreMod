@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      1.0.4
+// @version      1.0.5
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -14,35 +14,21 @@
 
 'use strict';
 
-function clearFlagsInObject(obj) {
-    let wasBlockedOriginal = false;
-    let anyChangeMade = false;
-    if (!obj || typeof obj !== 'object') return { wasBlockedOriginal, anyChangeMade };
-
-    const target = obj.moderation_response ? obj.moderation_response : obj;
-
-    if (target.blocked === true) {
-        wasBlockedOriginal = true;
-        target.blocked = false;
-        anyChangeMade = true;
-    }
-    if (target.flagged === true) {
-        target.flagged = false;
-        anyChangeMade = true;
-    }
-    return { wasBlockedOriginal, anyChangeMade };
+function clearFlagsInObject(moderationResult) {
+    if (!moderationResult || !moderationResult.blocked) return false;
+    const wasBlocked = moderationResult.blocked;
+    moderationResult.blocked = false;
+    return wasBlocked;
 }
 
 function isConversationRequest(requestInput) {
     let requestUrl = '';
     if (typeof requestInput === 'string') {
         requestUrl = requestInput;
-    } else if (requestInput instanceof Request) {
-        requestUrl = requestInput.url;
     } else if (requestInput && typeof requestInput.url === 'string') {
         requestUrl = requestInput.url;
     }
-    return /\/backend-api\/conversation\b/.test(requestUrl);
+    return /\/backend-api\/conversation(\/[a-f0-9-]{36})?$/.test(requestUrl);
 }
 
 const pageGlobal = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
@@ -89,8 +75,7 @@ pageGlobal.fetch = async (...args) => {
                             let jsonDataString = line.substring(5).trim();
                             try {
                                 let dataObj = JSON.parse(jsonDataString);
-                                const processResult = clearFlagsInObject(dataObj);
-                                if (processResult.wasBlockedOriginal) {
+                                if (clearFlagsInObject(dataObj.moderation_response)) {
                                     if (!currentMessageId) {
                                         currentMessageId = dataObj.message_id;
                                         const requestMessage = JSON.parse(args[1].body).messages[0];
@@ -130,45 +115,29 @@ pageGlobal.fetch = async (...args) => {
     } else if (contentType.includes('application/json')) {
         if (!originalResponse.body) return originalResponse;
 
-        const originalText = await originalResponse.text();
+        let jsonDataString = await originalResponse.text();
+        let modified = false;
         try {
-            let jsonData = JSON.parse(originalText);
-            let modified = false;
-            const idsToRestore = new Set();
+            let jsonData = JSON.parse(jsonDataString);
 
-            if (jsonData.moderation_results && Array.isArray(jsonData.moderation_results)) {
-                jsonData.moderation_results.forEach(modResult => {
-                    const processResult = clearFlagsInObject(modResult);
-                    if (processResult.wasBlockedOriginal && modResult.message_id) {
-                        idsToRestore.add(modResult.message_id);
-                    }
-                    modified = modified || processResult.anyChangeMade;
-                });
-            }
-
-            if (jsonData.mapping && typeof jsonData.mapping === 'object') {
-                for (const idToRestore of idsToRestore) {
-                    const messageEntry = jsonData.mapping[idToRestore];
-                    if (messageEntry?.message) {
-                        const storedContent = await GM.getValue(`msg_${idToRestore}`);
-                        if (storedContent) {
-                            const messageNode = messageEntry.message;
-                            if (!messageNode.content) {
-                                messageNode.content = { parts: [storedContent], content_type: "text" };
-                            } else {
-                                messageNode.content.parts = [storedContent];
-                                messageNode.content.content_type = "text";
-                            }
-                            modified = true;
-                        }
+            for (const modResult of jsonData.moderation_results) {
+                if (clearFlagsInObject(modResult) && modResult.message_id) {
+                    const messageEntry = jsonData.mapping[modResult.message_id];
+                    const storedContent = await GM.getValue(`msg_${modResult.message_id}`);
+                    if (storedContent) {
+                        const messageNode = messageEntry.message;
+                        messageNode.content.parts = [storedContent];
+                        messageNode.content.content_type = "text";
+                        modified = true;
                     }
                 }
             }
 
-            return new Response(modified ? JSON.stringify(jsonData) : originalText, { headers: originalResponse.headers, status: originalResponse.status, statusText: originalResponse.statusText});
+            if (modified) jsonDataString = JSON.stringify(jsonData);
         } catch (e) {
             console.error("ChatGPT PreMod: Error processing JSON", e);
-            return new Response(originalText, { headers: originalResponse.headers, status: originalResponse.status, statusText: originalResponse.statusText });
+        } finally {
+            return new Response(jsonDataString, { headers: originalResponse.headers, status: originalResponse.status, statusText: originalResponse.statusText});
         }
     }
 
