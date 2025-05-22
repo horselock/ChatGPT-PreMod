@@ -5,7 +5,7 @@ Hides moderation visual effects. _Prevents_ the deletion of streaming response a
 1. Install TamperMonkey/ViolentMonkey browser extension
 2. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
-# How to use
+# How this works
 - Use ChatGPT as usual. Whenever ChatGPT finishes writing a response, external moderation will scan it. If it triggers BLOCKED (red/removed), it will attempt to remove. This script prevents that, and will save it locally. Any time you load a conversation on the same device/browser, the messages will be restored.
 - If your own request is BLOCKED, the response stream will be interrupted immediately. It will continue generating on the server. When done, if it's also BLOCKED, no script can do anything about it. Try to avoid this, your own requests getting BLOCKED can lead to bans. I put in an alert.
 - There's still hope even for the above situation: you can ask ChatGPT to just repeat what it said. The model has no idea what was or wasn't removed and can see them fine, they're just messages in the history.
