@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      1.0.2
+// @version      1.0.3
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -33,24 +33,10 @@ function clearFlagsInObject(obj) {
     return { wasBlockedOriginal, anyChangeMade };
 }
 
-function isRelevant(requestInput) {
-    let requestUrl = '';
-    if (typeof requestInput === 'string') {
-        requestUrl = requestInput;
-    } else if (requestInput instanceof Request) {
-        requestUrl = requestInput.url;
-    } else if (requestInput && typeof requestInput.url === 'string') {
-        requestUrl = requestInput.url;
-    }
-    return requestUrl.includes('backend-api/conversation/');
-}
-
 const pageGlobal = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
 const originalFetch = pageGlobal.fetch;
 pageGlobal.fetch = async (...args) => {
-    if (!isRelevant(args[0])) return originalFetch.call(pageGlobal, ...args);
-
     const originalResponse = await originalFetch.call(pageGlobal, ...args);
     const contentType = originalResponse.headers.get('content-type') || '';
 
