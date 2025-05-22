@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      1.0.5
+// @version      1.0.6
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -14,7 +14,7 @@
 
 'use strict';
 
-function clearFlagsInObject(moderationResult) {
+function unBlock(moderationResult) {
     if (!moderationResult || !moderationResult.blocked) return false;
     const wasBlocked = moderationResult.blocked;
     moderationResult.blocked = false;
@@ -41,8 +41,6 @@ pageGlobal.fetch = async (...args) => {
     const contentType = originalResponse.headers.get('content-type') || '';
 
     if (contentType.includes('text/event-stream')) {
-        if (!originalResponse.body) return originalResponse;
-
         let currentMessageId = null;
         let accumulatedContent = "";
 
@@ -75,7 +73,7 @@ pageGlobal.fetch = async (...args) => {
                             let jsonDataString = line.substring(5).trim();
                             try {
                                 let dataObj = JSON.parse(jsonDataString);
-                                if (clearFlagsInObject(dataObj.moderation_response)) {
+                                if (unBlock(dataObj.moderation_response)) {
                                     if (!currentMessageId) {
                                         currentMessageId = dataObj.message_id;
                                         const requestMessage = JSON.parse(args[1].body).messages[0];
@@ -113,15 +111,13 @@ pageGlobal.fetch = async (...args) => {
         return new Response(stream, { headers: originalResponse.headers, status: originalResponse.status, statusText: originalResponse.statusText });
 
     } else if (contentType.includes('application/json')) {
-        if (!originalResponse.body) return originalResponse;
-
         let jsonDataString = await originalResponse.text();
         let modified = false;
         try {
             let jsonData = JSON.parse(jsonDataString);
 
             for (const modResult of jsonData.moderation_results) {
-                if (clearFlagsInObject(modResult) && modResult.message_id) {
+                if (unBlock(modResult) && modResult.message_id) {
                     const messageEntry = jsonData.mapping[modResult.message_id];
                     const storedContent = await GM.getValue(`msg_${modResult.message_id}`);
                     if (storedContent) {
