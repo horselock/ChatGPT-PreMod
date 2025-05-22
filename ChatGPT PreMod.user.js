@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      1.0.3
+// @version      1.0.4
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -33,10 +33,24 @@ function clearFlagsInObject(obj) {
     return { wasBlockedOriginal, anyChangeMade };
 }
 
+function isConversationRequest(requestInput) {
+    let requestUrl = '';
+    if (typeof requestInput === 'string') {
+        requestUrl = requestInput;
+    } else if (requestInput instanceof Request) {
+        requestUrl = requestInput.url;
+    } else if (requestInput && typeof requestInput.url === 'string') {
+        requestUrl = requestInput.url;
+    }
+    return /\/backend-api\/conversation\b/.test(requestUrl);
+}
+
 const pageGlobal = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
 const originalFetch = pageGlobal.fetch;
 pageGlobal.fetch = async (...args) => {
+    if (!isConversationRequest(args[0])) return originalFetch.call(pageGlobal, ...args);
+
     const originalResponse = await originalFetch.call(pageGlobal, ...args);
     const contentType = originalResponse.headers.get('content-type') || '';
 
@@ -45,7 +59,6 @@ pageGlobal.fetch = async (...args) => {
 
         let currentMessageId = null;
         let accumulatedContent = "";
-        let chunkHadBlockedEvent = false;
 
         const stream = new ReadableStream({
             async start(controller) {
@@ -70,41 +83,44 @@ pageGlobal.fetch = async (...args) => {
                     const rawChunk = dec.decode(value, { stream: true });
                     const lines = rawChunk.split('\n');
                     const processedChunkLines = [];
-                    chunkHadBlockedEvent = false;
 
                     for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const jsonDataString = line.substring(5).trim();
+                        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                            let jsonDataString = line.substring(5).trim();
                             try {
                                 let dataObj = JSON.parse(jsonDataString);
                                 const processResult = clearFlagsInObject(dataObj);
                                 if (processResult.wasBlockedOriginal) {
-                                    chunkHadBlockedEvent = true;
+                                    if (!currentMessageId) {
+                                        currentMessageId = dataObj.message_id;
+                                        const requestMessage = JSON.parse(args[1].body).messages[0];
+                                        if (currentMessageId === requestMessage.id) {
+                                            accumulatedContent = requestMessage.content.parts[0];
+                                            window.alert("Your request was BLOCKED (was still sent, just would be hidden from you if not for this script). It can lead to warning emails and bans, so careful. See README.md for details. Response will not be streamed, and if it also triggers BLOCKED, this script can't save it - you can ask ChatGPT to repeat its response though.");
+                                        } else {
+                                            window.alert("The response was BLOCKED, but Premod prevented removal and saved it userscript storage. It will be restored as long as you're on same browser with PreMod enabled. See README.md for details.");
+                                        }
+                                        jsonDataString = JSON.stringify(dataObj);
+                                    }
                                 }
 
-                                if (dataObj.v && typeof dataObj.v === 'string' && Object.keys(dataObj).length === 1) {
-                                    accumulatedContent += dataObj.v;
-                                } else if (dataObj.p === "" && dataObj.o === "patch" && Array.isArray(dataObj.v)) {
-                                    for (const op of dataObj.v) {
-                                        if (op.p?.startsWith("/message/content/parts/") && op.o === "append" && typeof op.v === 'string') {
-                                            accumulatedContent += op.v;
+                                if (dataObj.v && !currentMessageId) {
+                                    if (typeof dataObj.v === 'string') {
+                                        accumulatedContent += dataObj.v;
+                                    } else if (Array.isArray(dataObj.v)) {
+                                        for (const op of dataObj.v) {
+                                            if (op.o === "append" && typeof op.v === 'string') accumulatedContent += op.v;
                                         }
                                     }
                                 }
-                                if (dataObj.message_id && typeof dataObj.message_id === 'string') {
-                                    currentMessageId = dataObj.message_id;
-                                }
-                                processedChunkLines.push('data: ' + JSON.stringify(dataObj));
-                            } catch (e) { processedChunkLines.push(line); }
+                            } catch (e) {
+                                console.error('line: ' + line, e);
+                            } finally {
+                                processedChunkLines.push('data: ' + jsonDataString);
+                            }
                         } else { processedChunkLines.push(line); }
                     }
 
-                    const rawChunkIdMatch = rawChunk.match(/"message_id"\s*:\s*"([a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12})"/);
-                    if (rawChunkIdMatch && rawChunkIdMatch[1]) { currentMessageId = rawChunkIdMatch[1]; }
-
-                    if (chunkHadBlockedEvent) {
-                        window.alert("Latest message BLOCKED, but Premod prevented removal and saved.\n\nIf Your REQUEST (not the response) triggered this response will not stream and may never show. However, you can ask ChatGPT to repeat its response which will stream.\n\nNote too any REQUEST triggers may lead to a ban. False positives are very common, but moderation THINKS it saw sexual/minors or self-harm/instructions.");
-                    }
                     controller.enqueue(enc.encode(processedChunkLines.join('\n')));
                 }
             }
