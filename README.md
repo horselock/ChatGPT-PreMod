@@ -21,6 +21,8 @@ Now whe "ChatGPT anti censorship" extension also does prevents removal, but it's
 Some mobile browsers support extensions like TamperMonkey. I hear good things about Kiwi. Maybe Firefox Focus or something? IDK.
 
 # Misc notes
+If the main script breaks and you just need a quick fix (your messages NOT removed, but disappear when you leave the page), use the Simple Version.
+
 Like I said, I can enhance this with cloud storage if demand is high enough. Retrieve your conversations, any device, any browser!
 
 Official data export will still show deleted messages. It's GDPR mandated to have all your data, BLOCKED or no. So nothing is ever truly lost, it's just not conveniently there for us to look at in their interface.
