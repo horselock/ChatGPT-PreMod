@@ -5,10 +5,10 @@ Hides moderation visual effects. _Prevents_ the deletion of streaming response a
 1. Install TamperMonkey/ViolentMonkey browser extension
 2. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
-# How this works
-- Use ChatGPT as usual. Whenever ChatGPT finishes writing a response, external moderation will scan it. If it triggers BLOCKED (red/removed), it will attempt to remove. This script prevents that, and will save it locally. Any time you load a conversation on the same device/browser, the messages will be restored.
-- If your own request is BLOCKED, the response stream will be interrupted immediately. It will continue generating on the server. When done, if it's also BLOCKED, no script can do anything about it. Try to avoid this, your own requests getting BLOCKED can lead to bans. I put in an alert.
-- There's still hope even for the above situation: you can ask ChatGPT to just repeat what it said. The model has no idea what was or wasn't removed and can see them fine, they're just messages in the history.
+# How this works (IMPORTANT)
+- Use ChatGPT as usual. Whenever ChatGPT finishes writing a response, external moderation will scan it. If it triggers BLOCKED (red/removed), the ChatGPT platform will attempt to remove the message. This script prevents that, and will save it to your TamperMonkey extension's storage. Any time you load a conversation **on the same device/browser**, where the messages would have been blank, they will be there!
+- If your own request is BLOCKED, the response stream will be interrupted immediately - it'll stop like a word in, if that. It will continue generating on the server though. When done, if the response also triggers BLOCKED, it simply won't show. No script can do anything about it. However, you can ask it to repeat the last response - that request is obviously clean and won't be BLOCKED, so PreMod will be free to save the response.
+- Try to avoid your own requests getting BLOCKED - it can lead to bans. Too many BLOCKED in a row (some people say they've gotten it from just one) can lead to warning emails, and too many emails can lead to a ban. Exact numbers unknown. The categories that trigger this as `sexual/minors` and `self-harm/instructions`. The first category is VERY overly sensitive and prone to false positives, which is the only reason I'm writing this script. It can trip just from saying "young" or "girl" even, or mentions of family members, etc. - even if you all caps insist that everyone's an adult, it's super dumb and might still go off.
 
 # Why doesn't DeMod work like it used to?
 DeMod at its peak basically walked right through red, it was like it did nothing. It worked so amazingly because OpenAI was still sending BLOCKED messages all the way to end users, basically with instructions for the front end to delete them. All they had to do was make a one-line code change to not send them, and that's probably all they did. It's shocking it took them until mid 2024 to fix it.
@@ -18,11 +18,11 @@ So, we're left with this workaround of simply preventing the removal of blocked 
 Now whe "ChatGPT anti censorship" extension also does prevents removal, but it's Chrome only and doesn't save/restore the messages. Other scrips are in a similar boat, and they break often just due to random changes made on ChatGPT. I tried hard to keep my script simple and durable to change.
 
 # Mobile?
-Some mobile browsers support extensions like Tampermonkey. I hear good things about Kiwi. Maybe Firefox Focus or something? IDK.
+Some mobile browsers support extensions like TamperMonkey. I hear good things about Kiwi. Maybe Firefox Focus or something? IDK.
 
-# Other options
+# Misc notes
 Like I said, I can enhance this with cloud storage if demand is high enough. Retrieve your conversations, any device, any browser!
 
-And another option: do an official data export. It's GDPR mandated to have all your data, BLOCKED or no. So nothing is ever truly lost, it's just not conveniently there for us to look at in their interface.
+Official data export will still show deleted messages. It's GDPR mandated to have all your data, BLOCKED or no. So nothing is ever truly lost, it's just not conveniently there for us to look at in their interface.
 
-Also, for now, you can still have BLOCKED responses read aloud. Another goofy oversight.
+As of May 2025, you can still have BLOCKED responses read aloud as long as you're using an extension like this to hide the red warning.
