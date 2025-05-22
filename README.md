@@ -9,10 +9,9 @@ To install, have TamperMonkey extension installed and go here: https://github.co
 - There's still hope even for the above situation: you can ask ChatGPT to just repeat what it said. The model has no idea what was or wasn't removed and can see them fine, they're just messages in the history.
 
 # Why doesn't DeMod work like it used to?
+DeMod at its peak basically walked right through red, it was like it did nothing. It worked so amazingly because OpenAI was still sending BLOCKED messages all the way to end users, basically with instructions for the front end to delete them. All they had to do was make a one-line code change to not send them, and that's probably all they did. It's shocking it took them until mid 2024 to fix it.
 
-DeMod worked amazingly because OpenAI was still sending BLOCKED messages all the way to end users, basically with instructions for the front end to delete them. All they had to do was make a one-line code change to not send them. It's shocking it took them until mid 2024 to fix it.
-
-So, we're left with this workaround of simply preventing the removal of blocked messages and saving them locally (cloud storage is an option, I could implement if demand is high). The "ChatGPT anti censorship" extension also does prevents removal, but it's Chrome only and doesn't save/restore the messages. Other scrips are in a similar boat, and they break often just due to random changes made on ChatGPT. I tried hard to keep my script simple and durable to change.
+So, we're left with this workaround of simply preventing the removal of blocked messages and saving them locally (cloud storage is an option, I could implement if demand is high), and inserting them back in the chat when loading. There are limits, but this is actually almost back to full power. The "ChatGPT anti censorship" extension also does prevents removal, but it's Chrome only and doesn't save/restore the messages. Other scrips are in a similar boat, and they break often just due to random changes made on ChatGPT. I tried hard to keep my script simple and durable to change.
 
 # Mobile?
 Some mobile browsers support extensions like Tampermonkey. I hear good things about Kiwi.
