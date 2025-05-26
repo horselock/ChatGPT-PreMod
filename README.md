@@ -3,7 +3,7 @@ https://www.reddit.com/user/HORSELOCKSPACEPIRATE/
 Hides moderation visual effects. _Prevents_ the deletion of streaming response after they fully comes in and saves them locally. And injects them back into your chats when loading them! Thanks to lugia19 for the idea of how to inject them! He wrote one too (Unmod) but it broke with a random website update, so now I'm just doing my own take
 
 # Installation
-1. Install ViolentMonkey browser extension (No longer officially supported on Chrome due to V2 manifest, can use TamperMonkey instead. However there's still a working workaround as of May 26 - you can install it on mobile Chrome, then go to desktop and it'll be there)
+1. Install ViolentMonkey browser extension, may have to turn on browser's developer mode (ViolentMonkey longer officially supported on Chrome due to V2 manifest, but there's still a working workaround as of May 26 - you can install it on mobile Chrome, then go to desktop and it'll be there. TamperMonkey without extra steps but is not recommended)
 2. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
 # How this works (IMPORTANT)
