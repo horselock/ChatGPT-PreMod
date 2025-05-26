@@ -3,6 +3,7 @@ https://www.reddit.com/user/HORSELOCKSPACEPIRATE/ (see Jailbroken erotica GPT pi
 Hides moderation visual effects. _Prevents_ the deletion of streaming response after they fully comes in and saves them locally. And injects them back into your chats when loading them! Thanks to lugia19 for the idea of how to inject them! He wrote one too (Unmod) but it broke with a random website update, so now I'm just doing my own take
 
 # Installation
+0. Ensure you do not have similar scripts/extensions installed (like ChatGPT anti censorship Chrome extension)
 1. Install ViolentMonkey browser extension, may have to turn on browser's developer mode (ViolentMonkey no longer officially supported by Chrome due to V2 manifest, but as of May 26 there's a workaround - install frome mobile Chrome, then go to desktop. TamperMonkey is not recommended due to closed source, but works without extra steps)
 2. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
