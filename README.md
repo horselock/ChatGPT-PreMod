@@ -4,8 +4,9 @@ Hides moderation visual effects. _Prevents_ the deletion of streaming response a
 
 # Installation
 0. Ensure you do not have similar scripts/extensions installed (like ChatGPT anti censorship Chrome extension)
-1. Install ViolentMonkey browser extension, may have to turn on browser's developer mode (ViolentMonkey no longer officially supported by Chrome due to V2 manifest, but as of May 26 there's a workaround - install frome mobile Chrome, then go to desktop. TamperMonkey is not recommended due to closed source, but works without extra steps)
-2. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
+1. Install ViolentMonkey browser extension (ViolentMonkey no longer officially supported by Chrome due to V2 manifest, but as of May 26 there's a workaround - install frome mobile Chrome, then go to desktop. TamperMonkey is not recommended due to closed source, but works without extra steps)
+2. May have to turn on your browser's developer mode 
+3. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
 # How this works (IMPORTANT)
 - These have NOTHING to do with whether the model refuses or not. The flagging system only hides messages from YOU - that's it. How the model decides to respond depends entirely on the context.
