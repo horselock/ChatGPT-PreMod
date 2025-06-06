@@ -22,7 +22,7 @@ So, we're left with this workaround of simply preventing the removal of blocked 
 Now whe "ChatGPT anti censorship" extension also does prevents removal, but it's Chrome only and doesn't save/restore the messages. Other scrips are in a similar boat, and they break often just due to random changes made on ChatGPT. I tried hard to keep my script simple and durable to change.
 
 # Mobile?
-Some mobile browsers support extensions like ViolentMonkey. I hear good things about Kiwi. Maybe Firefox Focus or something? IDK.
+Some mobile browsers like Firefox support extensions; you can install ViolentMonkey.
 
 # Misc notes
 If the main script breaks and you just need a quick fix (your messages NOT removed, but disappear when you leave the page), use the Simple Version.
