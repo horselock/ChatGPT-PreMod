@@ -1,10 +1,10 @@
 https://www.reddit.com/user/HORSELOCKSPACEPIRATE/ (see Jailbroken erotica GPT pin for further information on red moderation)
 # ChatGPT-PreMod
-Hides moderation visual effects. _Prevents_ the deletion of streaming response after they fully comes in and saves them locally. With DeMod and similar, you lose them when you leave the page. But when you come back and load a convo, PreMod intercepts that response and puts those saved message back in, tricking the UI into thinking nothing was BLOCKED. Thanks to lugia19 for the idea of how to inject messages back in!
+Hides moderation visual effects. _Prevents_ the deletion of streaming responses after they fully come in and saves them locally. With DeMod and similar, you lose them when you leave the page. But when you come back and load a convo, PreMod intercepts the convo load and puts those saved message back in where there would be removed blanks, tricking the UI into thinking nothing was BLOCKED. Thanks to lugia19 for the idea of how to inject messages back in!
 
 # Installation
 0. Ensure you do not have similar scripts/extensions installed (like ChatGPT anti censorship Chrome extension)
-1. Install ViolentMonkey browser extension (TamperMonkey if you're on Chrome unles VM fixes their shit)
+1. Install ViolentMonkey browser extension (TamperMonkey if you're on Chrome unless VM fixes their shit)
 2. May have to turn on your browser's developer mode 
 3. Go here and click install: https://github.com/rayzorium/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
