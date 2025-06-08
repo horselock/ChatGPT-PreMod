@@ -1,6 +1,10 @@
-https://www.reddit.com/user/HORSELOCKSPACEPIRATE/ (see Jailbroken erotica GPT pin for further information on red moderation)
+# This repo will no longer be updated
+Go to my jailbreaking specific github for latest: https://github.com/horselock/ChatGPT-PreMod
+
 # ChatGPT-PreMod
 Hides moderation visual effects. _Prevents_ the deletion of streaming response after they fully comes in and saves them locally. And injects them back into your chats when loading them! Thanks to lugia19 for the idea of how to inject them! He wrote one too (Unmod) but it broke with a random website update, so now I'm just doing my own take
+
+https://www.reddit.com/user/HORSELOCKSPACEPIRATE/ (see Jailbroken erotica GPT pin for further information on red moderation)
 
 # Installation
 0. Ensure you do not have similar scripts/extensions installed (like ChatGPT anti censorship Chrome extension)
