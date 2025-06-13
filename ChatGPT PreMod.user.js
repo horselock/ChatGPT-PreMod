@@ -29,7 +29,7 @@
         } else if (requestInput && typeof requestInput.url === 'string') {
             requestUrl = requestInput.url;
         }
-        return /\/backend-api\/conversation(\/[a-f0-9-]{36})?$/.test(requestUrl);
+        return /\/backend-api\/(f\/)?conversation(\/[a-f0-9-]{36})?$/.test(requestUrl);
     }
 
     const pageGlobal = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
