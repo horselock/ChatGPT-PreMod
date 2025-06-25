@@ -8,9 +8,11 @@ Hides moderation visual effects. _Prevents_ the deletion of streaming responses 
 2. Install ViolentMonkey browser extension (TamperMonkey if you're on Chrome since ViolentMonkey is still on MV2)
 4. Go here and click install: https://github.com/horselock/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
-As of version 1.1.0, there will be visual feedback to show it's working. Tampermonkey/Violentmonkey icon will also typically have a number next to it to indicating how many scripts are active: 
+As of version 1.1.0, there will be visual feedback to show it's working:
+
 <img width="405" alt="image" src="https://github.com/user-attachments/assets/1ae944c2-c2e3-48ad-b6cd-6c86c7b0b5c8" />
 
+Tampermonkey/Violentmonkey icon will also typically have a number next to it to indicating how many scripts are active
 
 # How this works (IMPORTANT)
 - These have NOTHING to do with whether the model refuses or not. The flagging system only hides messages from YOU - that's it. How the model decides to respond depends entirely on the context.
