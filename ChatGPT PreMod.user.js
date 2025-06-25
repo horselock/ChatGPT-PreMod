@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      1.0.11
+// @version      1.1.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -15,6 +15,29 @@
 (function() {
     'use strict';
 
+    function showBanner(message, { color = '#4A5568', duration = 4000 } = {}) {
+        document.getElementById('premod-banner')?.remove();
+
+        const banner = document.createElement('div');
+        banner.id = 'premod-banner';
+        banner.textContent = message;
+        banner.style.backgroundColor = color;
+        document.body.appendChild(banner);
+
+        setTimeout(() => banner.classList.add('visible'), 10);
+        setTimeout(() => {
+            banner.classList.remove('visible');
+            banner.addEventListener('transitionend', () => banner.remove());
+        }, duration);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = `#premod-banner{position:fixed;top:15px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:6px;color:#fff;box-shadow:0 3px 10px #0005;z-index:9999;opacity:0;transition:opacity .4s ease,top .4s ease;pointer-events:none}#premod-banner.visible{top:25px;opacity:1}`;
+        document.head.appendChild(style);
+        showBanner('PreMod Active', { color: '#2c7a7b', duration: 3000 });
+    })
+
     function unBlock(moderationResult) {
         if (!moderationResult || !moderationResult.blocked) return false;
         const wasBlocked = moderationResult.blocked;
@@ -22,20 +45,14 @@
         return wasBlocked;
     }
 
-    function isConversationRequest(requestInput) {
-        let requestUrl = '';
-        if (typeof requestInput === 'string') {
-            requestUrl = requestInput;
-        } else if (requestInput && typeof requestInput.url === 'string') {
-            requestUrl = requestInput.url;
-        }
-        return /\/backend-api\/(f\/)?conversation(\/[a-f0-9-]{36})?$/.test(requestUrl);
-    }
-
     const pageGlobal = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
     const originalFetch = pageGlobal.fetch;
+
     pageGlobal.fetch = async function(...args) {
-        if (!isConversationRequest(args[0])) return originalFetch.call(pageGlobal, ...args);
+        const url = (typeof args[0] === 'string') ? args[0] : args[0]?.url;
+        if (!url || !/\/backend-api\/(f\/)?conversation(\/[a-f0-9-]{36})?$/.test(url)) {
+            return originalFetch.call(pageGlobal, ...args);
+        }
 
         const originalResponse = await originalFetch.call(pageGlobal, ...args);
         const contentType = originalResponse.headers.get('content-type') || '';
@@ -73,14 +90,14 @@
                                 try {
                                     let dataObj = JSON.parse(jsonDataString);
                                     if (unBlock(dataObj.moderation_response)) {
-                                        if (!currentMessageId) { // Keep the first we encounter because only one message per request can be unBLOCKED - if user msg is BLOCKED, the response will never show if it's also BLOCKED, so we can safely take the first
+                                        if (!currentMessageId) { // Keep the first we encounter
                                             currentMessageId = dataObj.message_id;
                                             const requestBody = JSON.parse(args[1].body);
                                             if (requestBody.messages && currentMessageId === requestBody.messages[0].id) {
                                                 accumulatedContent = requestBody.messages[0].content.parts[0];
-                                                window.alert("Your request was BLOCKED (was still sent, just would be hidden from you if not for this script). It can lead to warning emails and bans, so careful. See README.md for details. Response will not be streamed, and if it also triggers BLOCKED, this script can't save it - you can ask ChatGPT to repeat its response though.");
+                                                showBanner('REQUEST RED. Be careful!', { color: '#c53030', duration: 5000 });
                                             } else {
-                                                window.alert("The response was BLOCKED, but Premod prevented removal and saved it userscript storage. It will be restored as long as you're on same browser with PreMod enabled. See README.md for details.");
+                                                showBanner('Response red, saved it for you =)', { color: '#dd6b20' });
                                             }
                                             jsonDataString = JSON.stringify(dataObj);
                                         }
