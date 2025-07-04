@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      1.1.0
+// @version      1.1.1
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -25,18 +25,24 @@
         document.body.appendChild(banner);
 
         setTimeout(() => banner.classList.add('visible'), 10);
+
         setTimeout(() => {
             banner.classList.remove('visible');
             banner.addEventListener('transitionend', () => banner.remove());
         }, duration);
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    function whenReady(callback) {
+        if (document.readyState !== 'loading') callback();
+        else document.addEventListener('DOMContentLoaded', callback);
+    }
+
+    whenReady(() => {
         const style = document.createElement('style');
         style.textContent = `#premod-banner{position:fixed;top:15px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:6px;color:#fff;box-shadow:0 3px 10px #0005;z-index:9999;opacity:0;transition:opacity .4s ease,top .4s ease;pointer-events:none}#premod-banner.visible{top:25px;opacity:1}`;
         document.head.appendChild(style);
         showBanner('PreMod Active', { color: '#2c7a7b', duration: 3000 });
-    })
+    });
 
     function unBlock(moderationResult) {
         if (!moderationResult || !moderationResult.blocked) return false;
