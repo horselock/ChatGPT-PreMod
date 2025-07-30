@@ -5,7 +5,7 @@ Unofficial (obviously) userscript that hides moderation visual effects. _Prevent
 # Installation
 0. Ensure you do not have similar scripts/extensions installed (like CGPT "anti censorship" Chrome extension)
 1. Ensure your browser's developer mode is enabled (google it for your browser)
-2. Install ViolentMonkey browser extension. Mobile users can use Firefox, Edge, or some other browser that supports extensions (Chrome users may have to use TamperMonkey)  
+2. Install ViolentMonkey browser extension. Mobile users can use Firefox, Edge, or some other browser that supports extensions. Chrome users may have to use TamperMonkey - not ideal as it's proprietary. iOS users should download Userscripts from the App Store and enable it in Safari (there may be a better way but this is the only one I know).
 4. Go here and click install: https://github.com/horselock/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
 As of version 1.1.0, there will be visual feedback to show it's running:
@@ -38,3 +38,6 @@ Like I said, I can enhance this with cloud storage if demand is high enough. Ret
 Official data export will still show deleted messages. It's GDPR mandated to have all your data, BLOCKED or no. So nothing is ever truly lost, it's just not conveniently there for us to look at in their interface.
 
 As of May 2025, you can still have BLOCKED responses read aloud as long as you're using an extension like this to hide the red warning.
+
+# Changelog
+- 2.0.0 - iOS Safari support. People who previewed the 2.0.0-SNAPSHOT version, be warned that it used localStorage, which was a temporary workaround - messages saved won't be avaiable after upgrading. You can always look at your own localStrorage and save it.
