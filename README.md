@@ -1,4 +1,4 @@
-https://www.reddit.com/user/HORSELOCKSPACEPIRATE/ (see Jailbroken erotica GPT pin for further information on red moderation)
+https://www.spicywriter.com (see Jailbroken erotica GPT section for further information on red moderation)
 # PreMod
 Unofficial (obviously) userscript that hides moderation visual effects. _Prevents_ the deletion of streaming responses after they fully come in and saves them locally. With DeMod and similar, you lose them when you leave the page. But when you come back and load a convo, PreMod intercepts the convo load and puts those saved message back in where there would be removed blanks, tricking the UI into thinking nothing was BLOCKED. Thanks to lugia19 for the idea of how to inject messages back in!
 
