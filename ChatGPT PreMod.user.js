@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.0.0
+// @version      2.1.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -31,7 +31,10 @@
   window.addEventListener('message', messageHandler);
 
   const inpageCode = `(() => { "use strict";
+    const SHOW_BANNERS = true; // Set to false to disable banners
+
     const showBanner = (message, color = "#2c7a7b", duration = 2000) => {
+      if (!SHOW_BANNERS) return;
       if (!document.body) return setTimeout(() => showBanner(message, color, duration), 100);
 
       document.getElementById('premod-banner')?.remove();
@@ -114,14 +117,31 @@
                     let jsonString = line.slice(6).trim();
                     try {
                       const payload = JSON.parse(jsonString);
+
+                      // Filter out type: "moderation" chunks
+                      if (payload.type === 'moderation') {
+                        console.debug('[PreMod] Filtered out moderation chunk:', payload);
+                        return '';
+                      }
+
+                      // Filter out is_visually_hidden_from_conversation delta
+                      if (payload.p && payload.p.includes('is_visually_hidden_from_conversation')) {
+                        console.debug('[PreMod] Filtered out visibility hide delta:', payload);
+                        showBanner('"Help is available" removal prevented', "#48bb78", 3000);
+                        return '';
+                      }
+
                       if (unblockFlagged(payload.moderation_response)) {
+                        console.debug('[PreMod] Stream: Detected blocked=true, unblocking:', payload.message_id);
                         if (!currentMessageId) {
                           currentMessageId = payload.message_id;
                           const requestBody = JSON.parse(args[1].body);
                           if (requestBody.messages && currentMessageId === requestBody.messages[0].id) {
                             accumulatedContent = requestBody.messages[0].content.parts[0];
+                            console.debug('[PreMod] Stream: Input message blocked');
                             showBanner("REQUEST RED. Be careful!", "#c53030", 5000);
                           } else {
+                            console.debug('[PreMod] Stream: Response blocked');
                             showBanner("Response red, saved it for you =)", "#dd6b20");
                           }
                         }
@@ -167,9 +187,33 @@
           const responseData = JSON.parse(responseText);
           let modified = false;
 
+          // Unset is_visually_hidden_from_conversation in mapping
+          if (responseData.mapping) {
+            for (const uuid in responseData.mapping) {
+              const msg = responseData.mapping[uuid];
+              if (msg?.message?.metadata?.is_visually_hidden_from_conversation &&
+                  msg?.message?.author?.role === 'assistant') {
+                console.debug('[PreMod] Convo history: Unhiding message:', uuid);
+                msg.message.metadata.is_visually_hidden_from_conversation = false;
+                modified = true;
+              }
+            }
+          }
+
           if (Array.isArray(responseData.moderation_results)) {
             for (const result of responseData.moderation_results) {
+              // Filter out "Help is available" disclaimers
+              if (Array.isArray(result.disclaimers)) {
+                const originalLength = result.disclaimers.length;
+                result.disclaimers = result.disclaimers.filter(d => !d.includes('Help is available'));
+                if (result.disclaimers.length < originalLength) {
+                  console.debug('[PreMod] Convo history: Removed Help is available disclaimer');
+                  modified = true;
+                }
+              }
+
               if (unblockFlagged(result)) {
+                console.debug('[PreMod] Convo history: Restoring blocked message:', result.message_id);
                 modified = true;
                 if (result.message_id) {
                   const messageNode = responseData.mapping?.[result.message_id]?.message;

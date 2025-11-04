@@ -1,4 +1,7 @@
-https://www.spicywriter.com (see Jailbroken erotica GPT section for further information on red moderation)
+https://www.horselock.us (see Old Reddit Posts, Jailbroken Erotica GPT for further information on red moderation)
+
+Nov 4 update: Now prevents obnoxious "Help is available" moderation from removing the response. Toggle banner by setting SHOW_BANNERS at the top of the script =)
+
 # PreMod
 Unofficial (obviously) userscript that hides moderation visual effects. _Prevents_ the deletion of streaming responses after they fully come in and saves them locally. With DeMod and similar, you lose them when you leave the page. But when you come back and load a convo, PreMod intercepts the convo load and puts those saved message back in where there would be removed blanks, tricking the UI into thinking nothing was BLOCKED. Thanks to lugia19 for the idea of how to inject messages back in!
 
