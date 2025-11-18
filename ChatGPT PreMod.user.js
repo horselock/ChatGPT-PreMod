@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.1.0
+// @version      2.1.1
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -118,19 +118,7 @@
                     try {
                       const payload = JSON.parse(jsonString);
 
-                      // Filter out type: "moderation" chunks
-                      if (payload.type === 'moderation') {
-                        console.debug('[PreMod] Filtered out moderation chunk:', payload);
-                        return '';
-                      }
-
-                      // Filter out is_visually_hidden_from_conversation delta
-                      if (payload.p && payload.p.includes('is_visually_hidden_from_conversation')) {
-                        console.debug('[PreMod] Filtered out visibility hide delta:', payload);
-                        showBanner('"Help is available" removal prevented', "#48bb78", 3000);
-                        return '';
-                      }
-
+                      // Check for blocked messages FIRST before filtering anything
                       if (unblockFlagged(payload.moderation_response)) {
                         console.debug('[PreMod] Stream: Detected blocked=true, unblocking:', payload.message_id);
                         if (!currentMessageId) {
@@ -146,6 +134,19 @@
                           }
                         }
                         jsonString = JSON.stringify(payload);
+                      }
+
+                      // Filter out type: "moderation" chunks (AFTER checking for blocked)
+                      if (payload.type === 'moderation') {
+                        console.debug('[PreMod] Filtered out moderation chunk:', payload);
+                        return '';
+                      }
+
+                      // Filter out is_visually_hidden_from_conversation delta (AFTER checking for blocked)
+                      if (payload.p && payload.p.includes('is_visually_hidden_from_conversation')) {
+                        console.debug('[PreMod] Filtered out visibility hide delta:', payload);
+                        showBanner('"Help is available" removal prevented', "#48bb78", 3000);
+                        return '';
                       }
 
                       const content = payload.v;
