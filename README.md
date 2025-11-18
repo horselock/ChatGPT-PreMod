@@ -45,4 +45,6 @@ Official data export will still show deleted messages. It's GDPR mandated to hav
 As of May 2025, you can still have BLOCKED responses read aloud as long as you're using an extension like this to hide the red warning.
 
 # Changelog
+- 2.1.1 - Fixed blocked message detection broken in 2.1.0. Popup now shows and messages are saved properly again.
+- 2.1.0 - Added filtering for "Help is available" moderation removal. Added SHOW_BANNERS toggle. Added additional console debugging.
 - 2.0.0 - iOS Safari support. People who previewed the 2.0.0-SNAPSHOT version, be warned that it used localStorage, which was a temporary workaround - messages saved won't be avaiable after upgrading. You can always look at your own localStrorage and save it.
