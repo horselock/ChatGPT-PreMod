@@ -1,5 +1,7 @@
 https://www.horselock.us (see Old Reddit Posts, Jailbroken Erotica GPT for further information on red moderation)
 
+https://spicywriter.com - if you want to just write what you want, NSFW or otherwise, without worrying about nannying ;)
+
 Nov 4 update: Now prevents obnoxious "Help is available" moderation from removing the response. Toggle banner by setting SHOW_BANNERS at the top of the script =)
 
 # PreMod
