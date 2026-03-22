@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.1.1
+// @version      2.1.2
 // @description  Hides moderation visual effects. Prevents deletion of streaming response. Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -143,10 +143,15 @@
                       }
 
                       // Filter out is_visually_hidden_from_conversation delta (AFTER checking for blocked)
-                      if (payload.p && payload.p.includes('is_visually_hidden_from_conversation')) {
-                        console.debug('[PreMod] Filtered out visibility hide delta:', payload);
-                        showBanner('"Help is available" removal prevented', "#48bb78", 3000);
-                        return '';
+                      if (Array.isArray(payload.v)) {
+                        const filtered = payload.v.filter(op => !op?.p?.includes('is_visually_hidden_from_conversation'));
+                        if (filtered.length < payload.v.length) {
+                          console.debug('[PreMod] Filtered out visibility hide op from delta:', payload);
+                          showBanner('Safety disclaimer bypassed', "#48bb78", 3000);
+                          if (filtered.length === 0) return '';
+                          payload.v = filtered;
+                          jsonString = JSON.stringify(payload);
+                        }
                       }
 
                       const content = payload.v;
@@ -203,14 +208,11 @@
 
           if (Array.isArray(responseData.moderation_results)) {
             for (const result of responseData.moderation_results) {
-              // Filter out "Help is available" disclaimers
-              if (Array.isArray(result.disclaimers)) {
-                const originalLength = result.disclaimers.length;
-                result.disclaimers = result.disclaimers.filter(d => !d.includes('Help is available'));
-                if (result.disclaimers.length < originalLength) {
-                  console.debug('[PreMod] Convo history: Removed Help is available disclaimer');
-                  modified = true;
-                }
+              // Filter out safety disclaimers
+              if (Array.isArray(result.disclaimers) && result.disclaimers.length > 0) {
+                console.debug('[PreMod] Convo history: Removed disclaimer(s)');
+                result.disclaimers = [];
+                modified = true;
               }
 
               if (unblockFlagged(result)) {
