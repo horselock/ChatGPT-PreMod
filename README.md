@@ -7,7 +7,12 @@ Nov 4 update: Now prevents obnoxious "Help is available" moderation from removin
 # PreMod
 Unofficial (obviously) userscript that hides moderation visual effects. _Prevents_ the deletion of streaming responses after they fully come in and saves them locally. With DeMod and similar, you lose them when you leave the page. But when you come back and load a convo, PreMod intercepts the convo load and puts those saved message back in where there would be removed blanks, tricking the UI into thinking nothing was BLOCKED. Thanks to lugia19 for the idea of how to inject messages back in!
 
-The current red moderation message is "Your request was flagged as potentially violating our usage policy. Please try again with a different prompt."
+The current red moderation message is:
+
+> This content can’t be shown for safety reasons
+> Learn more about our intended model behavior in our Model Spec.
+
+**Note:** ChatGPT recently moved response streaming onto a WebSocket ("stream handoff") instead of the old fetch stream. 2.2.0 re-plumbs PreMod to hook that transport, which restores detection/saving of blocked messages - both model responses and your own user-written requests - that the change had temporarily broken. In theory double-reds (both your message AND the response flagged) are now salvageable too, since the response tokens still stream in full before the block verdict lands - though triggering one to prove it isn't worth the account risk.
 
 # Installation
 0. Ensure you do not have similar scripts/extensions installed (like CGPT "anti censorship" Chrome extension)
@@ -47,6 +52,8 @@ Official data export will still show deleted messages. It's GDPR mandated to hav
 As of May 2025, you can still have BLOCKED responses read aloud as long as you're using an extension like this to hide the red warning.
 
 # Changelog
+- 2.2.0 - Re-plumbed for ChatGPT's new WebSocket "stream handoff" transport. Moderation detection and saving (blocked responses and blocked user-written requests alike) broke when responses moved off the fetch stream onto a WebSocket; PreMod now hooks the WebSocket too. Double-reds are now theoretically salvageable. Also: on convo load, don't unblock a message we have no saved copy of (it was breaking scrolling).
+- 2.1.2 - Updated disclaimer filtering for the new moderation stream format (handles visibility-hide ops within delta arrays; now strips all safety disclaimers from convo history, not just "Help is available").
 - 2.1.1 - Fixed blocked message detection broken in 2.1.0. Popup now shows and messages are saved properly again.
 - 2.1.0 - Added filtering for "Help is available" moderation removal. Added SHOW_BANNERS toggle. Added additional console debugging.
 - 2.0.0 - iOS Safari support. People who previewed the 2.0.0-SNAPSHOT version, be warned that it used localStorage, which was a temporary workaround - messages saved won't be avaiable after upgrading. You can always look at your own localStrorage and save it.
