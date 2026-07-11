@@ -56,8 +56,6 @@
       }, duration);
     };
 
-    showBanner("PreMod Active");
-
     const pendingBridgeRequests = new Map();
 
     const messageListener = (event) => {
@@ -75,6 +73,14 @@
       const id = Math.random().toString(36).slice(2);
       pendingBridgeRequests.set(id, resolve);
       window.postMessage({ type: 'premod-bridge', id, op: operation, key, value }, '*');
+    });
+
+    bridge('get', 'showStartupBanner').then(v => {
+      if (v === undefined || v === null) {
+        bridge('set', 'showStartupBanner', true);
+      }
+      if (v === false || v === "false") return;
+      showBanner("PreMod Active");
     });
 
     const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversation(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
