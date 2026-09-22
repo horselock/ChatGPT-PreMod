@@ -2,7 +2,7 @@ https://www.horselock.us (see Old Reddit Posts, Jailbroken Erotica GPT for furth
 
 https://spicywriter.com - if you want to just write what you want, NSFW or otherwise, without worrying about nannying ;)
 
-Nov 4 update: Now prevents obnoxious "Help is available" moderation from removing the response. Toggle banner by setting SHOW_BANNERS at the top of the script =)
+Nov 4 update: Now prevents obnoxious "Help is available" moderation from removing the response. Banners can be toggled from your userscript manager's menu (e.g. the Tampermonkey/Violentmonkey toolbar icon) =)
 
 # PreMod
 Unofficial (obviously) userscript that hides moderation visual effects. _Prevents_ the deletion of streaming responses after they fully come in and saves them locally. With DeMod and similar, you lose them when you leave the page. But when you come back and load a convo, PreMod intercepts the convo load and puts those saved message back in where there would be removed blanks, tricking the UI into thinking nothing redded. Thanks to lugia19 for the idea of how to inject messages back in!
@@ -18,9 +18,12 @@ The current red moderation message is:
 
 # Installation
 0. Ensure you do not have similar scripts/extensions installed (like CGPT "anti censorship" Chrome extension)
-1. Ensure your browser's developer mode is enabled (google it for your browser)
-2. Install ViolentMonkey browser extension. Mobile users can use Firefox, Edge, or some other browser that supports extensions. Chrome users may have to use TamperMonkey - not ideal as it's proprietary. iOS users should download Userscripts from the App Store and enable it in Safari (there may be a better way but this is the only one I know).
-4. Go here and click install: https://github.com/horselock/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
+1. Install a userscript manager:
+   - **Desktop (Chrome, Edge, Firefox, etc.):** ViolentMonkey is recommended and is now available for Chrome too. TamperMonkey also works, but it's proprietary.
+   - **Android:** use a browser that supports extensions (Firefox, Edge, etc.) and install ViolentMonkey.
+   - **iOS:** download Userscripts from the App Store and enable it in Safari (there may be a better way but this is the only one I know).
+2. **Chrome/Edge and other Chromium browsers:** allow the extension to run userscripts. Go to your extensions page (e.g. `chrome://extensions`), open the userscript manager's **Details**, and turn on **Allow User Scripts**. On older browser versions without that toggle, enable **Developer mode** on the extensions page instead. Firefox and Safari don't need this step.
+3. Go here and click install: https://github.com/horselock/ChatGPT-PreMod/raw/refs/heads/main/ChatGPT%20PreMod.user.js
 
 As of version 1.1.0, there will be visual feedback to show it's running:
 
@@ -54,6 +57,7 @@ Official data export will still show deleted messages. It's GDPR mandated to hav
 As of May 2025, you can still have redded responses read aloud as long as you're using an extension like this to hide the red warning.
 
 # Changelog
+- 2.3.0 - Fixed PreMod not loading at all while logged in: ChatGPT's Content Security Policy now blocks the blob: script PreMod injected. The page code is now injected via GM_addElement where available, falling back to reusing the page's script nonce (e.g. iOS Userscripts). Fixed saved reds not being restored on convo load: ChatGPT now loads conversations from /backend-api/conversations/ (plural). Clearer console logging (verbose level) on convo load: shows whether a red had no saved copy, had one but the message wasn't in the response, or was restored. Also: banner settings moved out of the script and into storage, so they survive updates. Toggle all banners, or just the "PreMod Active" startup banner, from your userscript manager's menu. Replaces the SHOW_BANNERS constant. Startup banner toggle idea from sn-o-w (#1).
 - 2.2.0 - Re-plumbed for ChatGPT's new WebSocket "stream handoff" transport (seen so far around requests that red). Moderation detection and saving (redded responses and redded requests alike) had broken when that streaming moved off the fetch stream onto a WebSocket; PreMod now hooks the WebSocket too. Double reds are now theoretically salvageable. Also: on convo load, don't clear the red on a message we have no saved copy of (it was breaking scrolling).
 - 2.1.2 - Updated disclaimer filtering for the new moderation stream format (handles visibility-hide ops within delta arrays; now strips all safety disclaimers from convo history, not just "Help is available").
 - 2.1.1 - Fixed red message detection broken in 2.1.0. Popup now shows and messages are saved properly again.

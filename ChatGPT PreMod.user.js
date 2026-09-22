@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.2.0
+// @version      2.3.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -10,6 +10,9 @@
 // @run-at       document-start
 // @grant        GM.getValue
 // @grant        GM.setValue
+// @grant        GM.registerMenuCommand
+// @grant        GM.addElement
+// @grant        GM_addElement
 // ==/UserScript==
 
 (() => { "use strict";
@@ -30,12 +33,39 @@
 
   window.addEventListener('message', messageHandler);
 
-  const inpageCode = `(() => { "use strict";
-    const SHOW_BANNERS = true; // Set to false to disable banners
+  const toggleSetting = async (key, label) => {
+    const value = (await GM.getValue(key, true)) === false;
+    await GM.setValue(key, value);
+    window.postMessage({ type: 'premod-setting', key, value, label }, '*');
+  };
 
-    const showBanner = (message, color = "#2c7a7b", duration = 2000) => {
-      if (!SHOW_BANNERS) return;
-      if (!document.body) return setTimeout(() => showBanner(message, color, duration), 100);
+  if (typeof GM.registerMenuCommand === 'function') {
+    GM.registerMenuCommand('Toggle all banners', () => toggleSetting('showBanners', 'Banners'));
+    GM.registerMenuCommand('Toggle "PreMod Active" startup banner', () => toggleSetting('showStartupBanner', 'Startup banner'));
+  }
+
+  const inpageCode = `(() => { "use strict";
+    if (document.documentElement.dataset.premodInjected === '1') return;
+    document.documentElement.dataset.premodInjected = '1';
+
+    const settings = { showBanners: true, showStartupBanner: true };
+    const pendingBridgeRequests = new Map();
+
+    const bridge = (operation, key, value) => new Promise((resolve) => {
+      const id = Math.random().toString(36).slice(2);
+      pendingBridgeRequests.set(id, resolve);
+      window.postMessage({ type: 'premod-bridge', id, op: operation, key, value }, '*');
+    });
+
+    const settingsLoaded = Promise.all(Object.keys(settings).map(async (key) => {
+      const value = await bridge('get', key);
+      if (typeof value === 'boolean') settings[key] = value;
+    }));
+
+    const showBanner = async (message, color = "#2c7a7b", duration = 2000, force = false) => {
+      await settingsLoaded;
+      if (!force && !settings.showBanners) return;
+      if (!document.body) return setTimeout(() => showBanner(message, color, duration, force), 100);
 
       document.getElementById('premod-banner')?.remove();
       const banner = document.createElement('div');
@@ -56,9 +86,9 @@
       }, duration);
     };
 
-    showBanner("PreMod Active");
-
-    const pendingBridgeRequests = new Map();
+    settingsLoaded.then(() => {
+      if (settings.showStartupBanner) showBanner("PreMod Active");
+    });
 
     const messageListener = (event) => {
       const data = event.data;
@@ -66,18 +96,15 @@
         const resolve = pendingBridgeRequests.get(data.id);
         pendingBridgeRequests.delete(data.id);
         resolve(data.result);
+      } else if (data?.type === 'premod-setting' && data.key in settings && typeof data.value === 'boolean') {
+        settings[data.key] = data.value;
+        showBanner(data.label + ': ' + (data.value ? 'ON' : 'OFF'), "#2c7a7b", 2000, true);
       }
     };
 
     window.addEventListener('message', messageListener);
 
-    const bridge = (operation, key, value) => new Promise((resolve) => {
-      const id = Math.random().toString(36).slice(2);
-      pendingBridgeRequests.set(id, resolve);
-      window.postMessage({ type: 'premod-bridge', id, op: operation, key, value }, '*');
-    });
-
-    const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversation(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
+    const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
 
     // Your message text is only sent on the POST that starts a turn. Stash it here (same
@@ -236,16 +263,18 @@
               // Only unblock if we actually have the saved content to put back. Otherwise
               // leave it blocked - an unblocked-but-empty message breaks the UI (can't scroll).
               if (result.blocked && result.message_id) {
+                const storedContent = await bridge('get', 'msg_' + result.message_id);
                 const messageNode = responseData.mapping?.[result.message_id]?.message;
-                const storedContent = messageNode?.content ? await bridge('get', 'msg_' + result.message_id) : null;
-                if (storedContent) {
-                  console.debug('[PreMod] Convo history: Restoring blocked message:', result.message_id);
+                if (!storedContent) {
+                  console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
+                } else if (!messageNode?.content) {
+                  console.debug('[PreMod] Convo history: Saved content found, but message not in response, leaving blocked:', result.message_id, 'response keys:', Object.keys(responseData), 'mapping nodes:', Object.keys(responseData.mapping || {}).length);
+                } else {
+                  console.debug('[PreMod] Convo history: Saved content found, restoring blocked message:', result.message_id);
                   messageNode.content.parts = [storedContent];
                   messageNode.content.content_type = 'text';
                   result.blocked = false;
                   modified = true;
-                } else {
-                  console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
                 }
               }
             }
@@ -416,11 +445,60 @@
     });
   })();`;
 
-  const script = document.createElement('script');
-  script.src = URL.createObjectURL(new Blob([inpageCode], { type: 'text/javascript' }));
-  document.documentElement.appendChild(script);
-  script.onload = () => {
-    URL.revokeObjectURL(script.src);
-    script.remove();
+  const isInjected = () => document.documentElement.dataset.premodInjected === '1';
+
+  const findNonce = () => {
+    for (const script of document.getElementsByTagName('script')) {
+      const nonce = script.nonce || script.getAttribute('nonce');
+      if (nonce) return nonce;
+    }
+    return '';
   };
+
+  const injectWithNonce = (nonce) => {
+    const script = document.createElement('script');
+    script.nonce = nonce;
+    script.textContent = inpageCode;
+    document.documentElement.appendChild(script);
+    script.remove();
+    return isInjected();
+  };
+
+  const waitForNonce = () => {
+    const observer = new MutationObserver(() => {
+      if (isInjected()) return observer.disconnect();
+      const nonce = findNonce();
+      if (!nonce) return;
+      observer.disconnect();
+      injectWithNonce(nonce);
+    });
+    observer.observe(document, { childList: true, subtree: true });
+    document.addEventListener('DOMContentLoaded', () => observer.disconnect(), { once: true });
+  };
+
+  const injectWithBlob = () => {
+    const script = document.createElement('script');
+    script.src = URL.createObjectURL(new Blob([inpageCode], { type: 'text/javascript' }));
+    document.documentElement.appendChild(script);
+    script.onload = () => {
+      URL.revokeObjectURL(script.src);
+      script.remove();
+    };
+  };
+
+  const injectWithAddElement = async () => {
+    try {
+      if (typeof GM_addElement === 'function') GM_addElement('script', { textContent: inpageCode });
+      else if (typeof GM.addElement === 'function') await GM.addElement('script', { textContent: inpageCode });
+    } catch {}
+    return isInjected();
+  };
+
+  (async () => {
+    if (await injectWithAddElement()) return;
+    const nonce = findNonce();
+    if (nonce && injectWithNonce(nonce)) return;
+    injectWithBlob();
+    waitForNonce();
+  })();
 })();
