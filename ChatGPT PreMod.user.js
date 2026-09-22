@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.3.0
+// @version      2.4.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -104,6 +104,17 @@
 
     window.addEventListener('message', messageListener);
 
+    const saveMessage = (messageId, content, conversationId, isInput) =>
+      bridge('set', 'msg_' + messageId, { content, conversationId: conversationId || null, isInput, savedAt: new Date().toISOString() });
+
+    const readConversationId = (payload) => {
+      if (typeof payload?.conversation_id === 'string') return payload.conversation_id;
+      if (typeof payload?.v?.conversation_id === 'string') return payload.v.conversation_id;
+      return '';
+    };
+
+    const readMessage = (stored) => (typeof stored === 'string' ? stored : stored?.content) || '';
+
     const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
 
@@ -111,17 +122,22 @@
     // source the old fetch path read from args[1].body) so the WebSocket hook can restore
     // it if the request gets blocked - the block verdict now arrives over the WebSocket.
     const pendingInputs = new Map(); // message_id -> content
+    let currentTurn = { conversationId: null };
     const rememberInput = (args) => {
       try {
         const body = args?.[1]?.body;
-        if (typeof body !== 'string') return;
+        if (typeof body !== 'string') return null;
         const parsed = JSON.parse(body);
-        if (!Array.isArray(parsed.messages)) return;
+        if (!Array.isArray(parsed.messages)) return null;
+        currentTurn = { conversationId: typeof parsed.conversation_id === 'string' ? parsed.conversation_id : null };
         if (pendingInputs.size > 100) pendingInputs.clear();
         for (const m of parsed.messages) {
           if (m?.id && typeof m.content?.parts?.[0] === 'string') pendingInputs.set(m.id, m.content.parts[0]);
         }
-      } catch {}
+        return currentTurn;
+      } catch {
+        return null;
+      }
     };
 
     const originalFetch = fetch;
@@ -130,13 +146,14 @@
       if (!requestUrl || !apiUrlPattern.test(requestUrl)) {
         return originalFetch.apply(this, args);
       }
-      rememberInput(args);
+      const turn = rememberInput(args) || { conversationId: null };
 
       const apiResponse = await originalFetch.apply(this, args);
       const contentType = (apiResponse.headers.get('content-type') || '').toLowerCase();
 
       if (contentType.includes('text/event-stream')) {
         let currentMessageId = null;
+        let currentIsInput = false;
         let accumulatedContent = '';
 
         const modifiedStream = new ReadableStream({
@@ -150,7 +167,7 @@
                 const { done, value } = await reader.read();
                 if (done) {
                   if (currentMessageId && accumulatedContent) {
-                    await bridge('set', 'msg_' + currentMessageId, accumulatedContent);
+                    await saveMessage(currentMessageId, accumulatedContent, turn.conversationId, currentIsInput);
                   }
                   controller.close();
                   break;
@@ -162,6 +179,8 @@
                     let jsonString = line.slice(6).trim();
                     try {
                       const payload = JSON.parse(jsonString);
+                      const payloadConversationId = readConversationId(payload);
+                      if (payloadConversationId) turn.conversationId = payloadConversationId;
 
                       // Check for blocked messages FIRST before filtering anything
                       if (unblockFlagged(payload.moderation_response)) {
@@ -171,6 +190,7 @@
                           const requestBody = JSON.parse(args[1].body);
                           if (requestBody.messages && currentMessageId === requestBody.messages[0].id) {
                             accumulatedContent = requestBody.messages[0].content.parts[0];
+                            currentIsInput = true;
                             console.debug('[PreMod] Stream: Input message blocked');
                             showBanner("REQUEST RED. Be careful!", "#c53030", 5000);
                           } else {
@@ -263,7 +283,7 @@
               // Only unblock if we actually have the saved content to put back. Otherwise
               // leave it blocked - an unblocked-but-empty message breaks the UI (can't scroll).
               if (result.blocked && result.message_id) {
-                const storedContent = await bridge('get', 'msg_' + result.message_id);
+                const storedContent = readMessage(await bridge('get', 'msg_' + result.message_id));
                 const messageNode = responseData.mapping?.[result.message_id]?.message;
                 if (!storedContent) {
                   console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
@@ -304,7 +324,7 @@
       let state = wsTurnState.get(topicId);
       if (!state) {
         if (wsTurnState.size > 100) wsTurnState.clear(); // crude leak guard over a long session
-        state = { accumulatedContent: '', sawFinal: false };
+        state = { accumulatedContent: '', sawFinal: false, turn: currentTurn };
         wsTurnState.set(topicId, state);
       }
       return state;
@@ -320,6 +340,8 @@
         if (!line.startsWith('data: ') || line === 'data: [DONE]') { kept.push(line); continue; }
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
+        const payloadConversationId = readConversationId(payload);
+        if (payloadConversationId) state.turn.conversationId = payloadConversationId;
 
         // Once the visible ("final") assistant message is added, start accumulating its text
         if (payload.v && payload.v.message && payload.v.message.channel === 'final') {
@@ -338,7 +360,7 @@
           const isInput = inputContent !== undefined;
           const content = isInput ? inputContent : state.accumulatedContent;
           if (blockedId && content) {
-            bridge('set', 'msg_' + blockedId, content);
+            saveMessage(blockedId, content, state.turn.conversationId, isInput);
             console.debug('[PreMod] WS: Saved blocked ' + (isInput ? 'input' : 'response') + ':', blockedId);
           }
           showBanner(isInput ? 'REQUEST RED. Be careful!' : 'Response red, saved it for you =)', isInput ? '#c53030' : '#dd6b20', isInput ? 5000 : 2000);
