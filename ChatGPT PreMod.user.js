@@ -104,7 +104,7 @@
 
     window.addEventListener('message', messageListener);
 
-    const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversation(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
+    const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
 
     // Your message text is only sent on the POST that starts a turn. Stash it here (same
