@@ -11,6 +11,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
+// @grant        GM.addElement
+// @grant        GM_addElement
 // ==/UserScript==
 
 (() => { "use strict";
@@ -43,6 +45,9 @@
   }
 
   const inpageCode = `(() => { "use strict";
+    if (document.documentElement.dataset.premodInjected === '1') return;
+    document.documentElement.dataset.premodInjected = '1';
+
     const settings = { showBanners: true, showStartupBanner: true };
     const pendingBridgeRequests = new Map();
 
@@ -438,11 +443,60 @@
     });
   })();`;
 
-  const script = document.createElement('script');
-  script.src = URL.createObjectURL(new Blob([inpageCode], { type: 'text/javascript' }));
-  document.documentElement.appendChild(script);
-  script.onload = () => {
-    URL.revokeObjectURL(script.src);
-    script.remove();
+  const isInjected = () => document.documentElement.dataset.premodInjected === '1';
+
+  const findNonce = () => {
+    for (const script of document.getElementsByTagName('script')) {
+      const nonce = script.nonce || script.getAttribute('nonce');
+      if (nonce) return nonce;
+    }
+    return '';
   };
+
+  const injectWithNonce = (nonce) => {
+    const script = document.createElement('script');
+    script.nonce = nonce;
+    script.textContent = inpageCode;
+    document.documentElement.appendChild(script);
+    script.remove();
+    return isInjected();
+  };
+
+  const waitForNonce = () => {
+    const observer = new MutationObserver(() => {
+      if (isInjected()) return observer.disconnect();
+      const nonce = findNonce();
+      if (!nonce) return;
+      observer.disconnect();
+      injectWithNonce(nonce);
+    });
+    observer.observe(document, { childList: true, subtree: true });
+    document.addEventListener('DOMContentLoaded', () => observer.disconnect(), { once: true });
+  };
+
+  const injectWithBlob = () => {
+    const script = document.createElement('script');
+    script.src = URL.createObjectURL(new Blob([inpageCode], { type: 'text/javascript' }));
+    document.documentElement.appendChild(script);
+    script.onload = () => {
+      URL.revokeObjectURL(script.src);
+      script.remove();
+    };
+  };
+
+  const injectWithAddElement = async () => {
+    try {
+      if (typeof GM_addElement === 'function') GM_addElement('script', { textContent: inpageCode });
+      else if (typeof GM.addElement === 'function') await GM.addElement('script', { textContent: inpageCode });
+    } catch {}
+    return isInjected();
+  };
+
+  (async () => {
+    if (await injectWithAddElement()) return;
+    const nonce = findNonce();
+    if (nonce && injectWithNonce(nonce)) return;
+    injectWithBlob();
+    waitForNonce();
+  })();
 })();
