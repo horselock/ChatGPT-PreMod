@@ -107,6 +107,12 @@
     const saveMessage = (messageId, content, conversationId, isInput) =>
       bridge('set', 'msg_' + messageId, { content, conversationId: conversationId || null, isInput, savedAt: new Date().toISOString() });
 
+    const readConversationId = (payload) => {
+      if (typeof payload?.conversation_id === 'string') return payload.conversation_id;
+      if (typeof payload?.v?.conversation_id === 'string') return payload.v.conversation_id;
+      return '';
+    };
+
     const readMessage = (stored) => (typeof stored === 'string' ? stored : stored?.content) || '';
 
     const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
@@ -171,7 +177,8 @@
                     let jsonString = line.slice(6).trim();
                     try {
                       const payload = JSON.parse(jsonString);
-                      if (typeof payload.conversation_id === 'string') conversationId = currentConversationId = payload.conversation_id;
+                      const payloadConversationId = readConversationId(payload);
+                      if (payloadConversationId) conversationId = currentConversationId = payloadConversationId;
 
                       // Check for blocked messages FIRST before filtering anything
                       if (unblockFlagged(payload.moderation_response)) {
@@ -331,7 +338,8 @@
         if (!line.startsWith('data: ') || line === 'data: [DONE]') { kept.push(line); continue; }
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
-        if (typeof payload.conversation_id === 'string') state.conversationId = currentConversationId = payload.conversation_id;
+        const payloadConversationId = readConversationId(payload);
+        if (payloadConversationId) state.conversationId = currentConversationId = payloadConversationId;
 
         // Once the visible ("final") assistant message is added, start accumulating its text
         if (payload.v && payload.v.message && payload.v.message.channel === 'final') {
