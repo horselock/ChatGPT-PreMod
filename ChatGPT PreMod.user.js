@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.2.0
+// @version      2.3.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -10,6 +10,7 @@
 // @run-at       document-start
 // @grant        GM.getValue
 // @grant        GM.setValue
+// @grant        GM.registerMenuCommand
 // ==/UserScript==
 
 (() => { "use strict";
@@ -30,12 +31,36 @@
 
   window.addEventListener('message', messageHandler);
 
-  const inpageCode = `(() => { "use strict";
-    const SHOW_BANNERS = true; // Set to false to disable banners
+  const toggleSetting = async (key, label) => {
+    const value = (await GM.getValue(key, true)) === false;
+    await GM.setValue(key, value);
+    window.postMessage({ type: 'premod-setting', key, value, label }, '*');
+  };
 
-    const showBanner = (message, color = "#2c7a7b", duration = 2000) => {
-      if (!SHOW_BANNERS) return;
-      if (!document.body) return setTimeout(() => showBanner(message, color, duration), 100);
+  if (typeof GM.registerMenuCommand === 'function') {
+    GM.registerMenuCommand('Toggle all banners', () => toggleSetting('showBanners', 'Banners'));
+    GM.registerMenuCommand('Toggle "PreMod Active" startup banner', () => toggleSetting('showStartupBanner', 'Startup banner'));
+  }
+
+  const inpageCode = `(() => { "use strict";
+    const settings = { showBanners: true, showStartupBanner: true };
+    const pendingBridgeRequests = new Map();
+
+    const bridge = (operation, key, value) => new Promise((resolve) => {
+      const id = Math.random().toString(36).slice(2);
+      pendingBridgeRequests.set(id, resolve);
+      window.postMessage({ type: 'premod-bridge', id, op: operation, key, value }, '*');
+    });
+
+    const settingsLoaded = Promise.all(Object.keys(settings).map(async (key) => {
+      const value = await bridge('get', key);
+      if (typeof value === 'boolean') settings[key] = value;
+    }));
+
+    const showBanner = async (message, color = "#2c7a7b", duration = 2000, force = false) => {
+      await settingsLoaded;
+      if (!force && !settings.showBanners) return;
+      if (!document.body) return setTimeout(() => showBanner(message, color, duration, force), 100);
 
       document.getElementById('premod-banner')?.remove();
       const banner = document.createElement('div');
@@ -56,9 +81,9 @@
       }, duration);
     };
 
-    showBanner("PreMod Active");
-
-    const pendingBridgeRequests = new Map();
+    settingsLoaded.then(() => {
+      if (settings.showStartupBanner) showBanner("PreMod Active");
+    });
 
     const messageListener = (event) => {
       const data = event.data;
@@ -66,16 +91,13 @@
         const resolve = pendingBridgeRequests.get(data.id);
         pendingBridgeRequests.delete(data.id);
         resolve(data.result);
+      } else if (data?.type === 'premod-setting' && data.key in settings) {
+        settings[data.key] = data.value;
+        showBanner(data.label + ': ' + (data.value ? 'ON' : 'OFF'), "#2c7a7b", 2000, true);
       }
     };
 
     window.addEventListener('message', messageListener);
-
-    const bridge = (operation, key, value) => new Promise((resolve) => {
-      const id = Math.random().toString(36).slice(2);
-      pendingBridgeRequests.set(id, resolve);
-      window.postMessage({ type: 'premod-bridge', id, op: operation, key, value }, '*');
-    });
 
     const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversation(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
