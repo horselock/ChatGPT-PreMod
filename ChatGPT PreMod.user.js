@@ -91,7 +91,6 @@
     });
 
     const messageListener = (event) => {
-      if (event.source !== window) return;
       const data = event.data;
       if (data?.type === 'premod-response' && pendingBridgeRequests.has(data.id)) {
         const resolve = pendingBridgeRequests.get(data.id);
