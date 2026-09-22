@@ -17,7 +17,6 @@
 
 (() => { "use strict";
   const messageHandler = async (event) => {
-    if (event.source !== window) return;
     const data = event.data;
     if (!data || data.type !== 'premod-bridge') return;
 
