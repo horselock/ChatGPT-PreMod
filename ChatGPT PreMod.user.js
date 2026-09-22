@@ -263,16 +263,18 @@
               // Only unblock if we actually have the saved content to put back. Otherwise
               // leave it blocked - an unblocked-but-empty message breaks the UI (can't scroll).
               if (result.blocked && result.message_id) {
+                const storedContent = await bridge('get', 'msg_' + result.message_id);
                 const messageNode = responseData.mapping?.[result.message_id]?.message;
-                const storedContent = messageNode?.content ? await bridge('get', 'msg_' + result.message_id) : null;
-                if (storedContent) {
-                  console.debug('[PreMod] Convo history: Restoring blocked message:', result.message_id);
+                if (!storedContent) {
+                  console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
+                } else if (!messageNode?.content) {
+                  console.debug('[PreMod] Convo history: Saved content found, but message not in response, leaving blocked:', result.message_id, 'response keys:', Object.keys(responseData), 'mapping nodes:', Object.keys(responseData.mapping || {}).length);
+                } else {
+                  console.debug('[PreMod] Convo history: Saved content found, restoring blocked message:', result.message_id);
                   messageNode.content.parts = [storedContent];
                   messageNode.content.content_type = 'text';
                   result.blocked = false;
                   modified = true;
-                } else {
-                  console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
                 }
               }
             }
