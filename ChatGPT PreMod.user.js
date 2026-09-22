@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.3.0
+// @version      2.4.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -104,6 +104,11 @@
 
     window.addEventListener('message', messageListener);
 
+    const saveMessage = (messageId, content, conversationId, isInput) =>
+      bridge('set', 'msg_' + messageId, { content, conversationId: conversationId || null, isInput, savedAt: new Date().toISOString() });
+
+    const readMessage = (stored) => (typeof stored === 'string' ? stored : stored?.content) || '';
+
     const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
 
@@ -137,6 +142,8 @@
 
       if (contentType.includes('text/event-stream')) {
         let currentMessageId = null;
+        let currentIsInput = false;
+        let conversationId = null;
         let accumulatedContent = '';
 
         const modifiedStream = new ReadableStream({
@@ -150,7 +157,7 @@
                 const { done, value } = await reader.read();
                 if (done) {
                   if (currentMessageId && accumulatedContent) {
-                    await bridge('set', 'msg_' + currentMessageId, accumulatedContent);
+                    await saveMessage(currentMessageId, accumulatedContent, conversationId, currentIsInput);
                   }
                   controller.close();
                   break;
@@ -162,6 +169,7 @@
                     let jsonString = line.slice(6).trim();
                     try {
                       const payload = JSON.parse(jsonString);
+                      if (!conversationId && typeof payload.conversation_id === 'string') conversationId = payload.conversation_id;
 
                       // Check for blocked messages FIRST before filtering anything
                       if (unblockFlagged(payload.moderation_response)) {
@@ -171,6 +179,8 @@
                           const requestBody = JSON.parse(args[1].body);
                           if (requestBody.messages && currentMessageId === requestBody.messages[0].id) {
                             accumulatedContent = requestBody.messages[0].content.parts[0];
+                            currentIsInput = true;
+                            if (!conversationId && typeof requestBody.conversation_id === 'string') conversationId = requestBody.conversation_id;
                             console.debug('[PreMod] Stream: Input message blocked');
                             showBanner("REQUEST RED. Be careful!", "#c53030", 5000);
                           } else {
@@ -263,7 +273,7 @@
               // Only unblock if we actually have the saved content to put back. Otherwise
               // leave it blocked - an unblocked-but-empty message breaks the UI (can't scroll).
               if (result.blocked && result.message_id) {
-                const storedContent = await bridge('get', 'msg_' + result.message_id);
+                const storedContent = readMessage(await bridge('get', 'msg_' + result.message_id));
                 const messageNode = responseData.mapping?.[result.message_id]?.message;
                 if (!storedContent) {
                   console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
@@ -304,7 +314,7 @@
       let state = wsTurnState.get(topicId);
       if (!state) {
         if (wsTurnState.size > 100) wsTurnState.clear(); // crude leak guard over a long session
-        state = { accumulatedContent: '', sawFinal: false };
+        state = { accumulatedContent: '', sawFinal: false, conversationId: null };
         wsTurnState.set(topicId, state);
       }
       return state;
@@ -320,6 +330,7 @@
         if (!line.startsWith('data: ') || line === 'data: [DONE]') { kept.push(line); continue; }
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
+        if (!state.conversationId && typeof payload.conversation_id === 'string') state.conversationId = payload.conversation_id;
 
         // Once the visible ("final") assistant message is added, start accumulating its text
         if (payload.v && payload.v.message && payload.v.message.channel === 'final') {
@@ -338,7 +349,7 @@
           const isInput = inputContent !== undefined;
           const content = isInput ? inputContent : state.accumulatedContent;
           if (blockedId && content) {
-            bridge('set', 'msg_' + blockedId, content);
+            saveMessage(blockedId, content, state.conversationId, isInput);
             console.debug('[PreMod] WS: Saved blocked ' + (isInput ? 'input' : 'response') + ':', blockedId);
           }
           showBanner(isInput ? 'REQUEST RED. Be careful!' : 'Response red, saved it for you =)', isInput ? '#c53030' : '#dd6b20', isInput ? 5000 : 2000);
