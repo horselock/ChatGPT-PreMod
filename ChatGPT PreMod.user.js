@@ -122,19 +122,22 @@
     // source the old fetch path read from args[1].body) so the WebSocket hook can restore
     // it if the request gets blocked - the block verdict now arrives over the WebSocket.
     const pendingInputs = new Map(); // message_id -> content
-    let currentConversationId = null;
+    let currentTurn = { conversationId: null };
     const rememberInput = (args) => {
       try {
         const body = args?.[1]?.body;
-        if (typeof body !== 'string') return;
+        if (typeof body !== 'string') return null;
         const parsed = JSON.parse(body);
-        if (!Array.isArray(parsed.messages)) return;
-        currentConversationId = typeof parsed.conversation_id === 'string' ? parsed.conversation_id : null;
+        if (!Array.isArray(parsed.messages)) return null;
+        currentTurn = { conversationId: typeof parsed.conversation_id === 'string' ? parsed.conversation_id : null };
         if (pendingInputs.size > 100) pendingInputs.clear();
         for (const m of parsed.messages) {
           if (m?.id && typeof m.content?.parts?.[0] === 'string') pendingInputs.set(m.id, m.content.parts[0]);
         }
-      } catch {}
+        return currentTurn;
+      } catch {
+        return null;
+      }
     };
 
     const originalFetch = fetch;
@@ -143,7 +146,7 @@
       if (!requestUrl || !apiUrlPattern.test(requestUrl)) {
         return originalFetch.apply(this, args);
       }
-      rememberInput(args);
+      const turn = rememberInput(args) || { conversationId: null };
 
       const apiResponse = await originalFetch.apply(this, args);
       const contentType = (apiResponse.headers.get('content-type') || '').toLowerCase();
@@ -151,7 +154,6 @@
       if (contentType.includes('text/event-stream')) {
         let currentMessageId = null;
         let currentIsInput = false;
-        let conversationId = currentConversationId;
         let accumulatedContent = '';
 
         const modifiedStream = new ReadableStream({
@@ -165,7 +167,7 @@
                 const { done, value } = await reader.read();
                 if (done) {
                   if (currentMessageId && accumulatedContent) {
-                    await saveMessage(currentMessageId, accumulatedContent, conversationId, currentIsInput);
+                    await saveMessage(currentMessageId, accumulatedContent, turn.conversationId, currentIsInput);
                   }
                   controller.close();
                   break;
@@ -178,7 +180,7 @@
                     try {
                       const payload = JSON.parse(jsonString);
                       const payloadConversationId = readConversationId(payload);
-                      if (payloadConversationId) conversationId = currentConversationId = payloadConversationId;
+                      if (payloadConversationId) turn.conversationId = payloadConversationId;
 
                       // Check for blocked messages FIRST before filtering anything
                       if (unblockFlagged(payload.moderation_response)) {
@@ -322,7 +324,7 @@
       let state = wsTurnState.get(topicId);
       if (!state) {
         if (wsTurnState.size > 100) wsTurnState.clear(); // crude leak guard over a long session
-        state = { accumulatedContent: '', sawFinal: false, conversationId: currentConversationId };
+        state = { accumulatedContent: '', sawFinal: false, turn: currentTurn };
         wsTurnState.set(topicId, state);
       }
       return state;
@@ -339,7 +341,7 @@
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
         const payloadConversationId = readConversationId(payload);
-        if (payloadConversationId) state.conversationId = payloadConversationId;
+        if (payloadConversationId) state.turn.conversationId = payloadConversationId;
 
         // Once the visible ("final") assistant message is added, start accumulating its text
         if (payload.v && payload.v.message && payload.v.message.channel === 'final') {
@@ -358,7 +360,7 @@
           const isInput = inputContent !== undefined;
           const content = isInput ? inputContent : state.accumulatedContent;
           if (blockedId && content) {
-            saveMessage(blockedId, content, state.conversationId, isInput);
+            saveMessage(blockedId, content, state.turn.conversationId, isInput);
             console.debug('[PreMod] WS: Saved blocked ' + (isInput ? 'input' : 'response') + ':', blockedId);
           }
           showBanner(isInput ? 'REQUEST RED. Be careful!' : 'Response red, saved it for you =)', isInput ? '#c53030' : '#dd6b20', isInput ? 5000 : 2000);
