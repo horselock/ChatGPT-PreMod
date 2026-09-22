@@ -17,6 +17,7 @@
 
 (() => { "use strict";
   const messageHandler = async (event) => {
+    if (event.source !== window) return;
     const data = event.data;
     if (!data || data.type !== 'premod-bridge') return;
 
@@ -91,12 +92,13 @@
     });
 
     const messageListener = (event) => {
+      if (event.source !== window) return;
       const data = event.data;
       if (data?.type === 'premod-response' && pendingBridgeRequests.has(data.id)) {
         const resolve = pendingBridgeRequests.get(data.id);
         pendingBridgeRequests.delete(data.id);
         resolve(data.result);
-      } else if (data?.type === 'premod-setting' && data.key in settings) {
+      } else if (data?.type === 'premod-setting' && data.key in settings && typeof data.value === 'boolean') {
         settings[data.key] = data.value;
         showBanner(data.label + ': ' + (data.value ? 'ON' : 'OFF'), "#2c7a7b", 2000, true);
       }
