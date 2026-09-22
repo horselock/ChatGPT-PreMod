@@ -128,8 +128,8 @@
         const body = args?.[1]?.body;
         if (typeof body !== 'string') return;
         const parsed = JSON.parse(body);
-        currentConversationId = typeof parsed.conversation_id === 'string' ? parsed.conversation_id : null;
         if (!Array.isArray(parsed.messages)) return;
+        currentConversationId = typeof parsed.conversation_id === 'string' ? parsed.conversation_id : null;
         if (pendingInputs.size > 100) pendingInputs.clear();
         for (const m of parsed.messages) {
           if (m?.id && typeof m.content?.parts?.[0] === 'string') pendingInputs.set(m.id, m.content.parts[0]);
@@ -339,7 +339,7 @@
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
         const payloadConversationId = readConversationId(payload);
-        if (payloadConversationId) state.conversationId = currentConversationId = payloadConversationId;
+        if (payloadConversationId) state.conversationId = payloadConversationId;
 
         // Once the visible ("final") assistant message is added, start accumulating its text
         if (payload.v && payload.v.message && payload.v.message.channel === 'final') {
