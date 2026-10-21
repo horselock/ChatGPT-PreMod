@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.4.0
+// @version      2.4.1
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -9,6 +9,7 @@
 // @updateURL    https://github.com/horselock/ChatGPT-PreMod/raw/main/ChatGPT%20PreMod.user.js
 // @run-at       document-start
 // @grant        GM.getValue
+// @grant        GM.getValues
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
 // @grant        GM.addElement
@@ -16,6 +17,23 @@
 // ==/UserScript==
 
 (() => { "use strict";
+  // ChatGPT restores a conversation from its local cache, where blocked messages are
+  // already blanked. A messageId parameter makes it load history from the server instead,
+  // which we can fix up. Empty selects that mode without pointing at a particular message.
+  // Set it before the app reads the initial URL; the page code covers later navigation.
+  const historyModeUrl = (destination) => {
+    const url = new URL(destination, location.href);
+    if (url.origin !== location.origin || !/\/c\/[a-f0-9-]{36}\/?$/i.test(url.pathname)) return null;
+    if (url.searchParams.has('messageId') || url.searchParams.has('message')) return null;
+    url.searchParams.set('messageId', '');
+    return url.href;
+  };
+
+  try {
+    const initialUrl = window.top === window.self && historyModeUrl(location.href);
+    if (initialUrl) history.replaceState(history.state, '', initialUrl);
+  } catch {}
+
   const messageHandler = async (event) => {
     const data = event.data;
     if (!data || data.type !== 'premod-bridge') return;
@@ -23,6 +41,10 @@
     let result;
     try {
       if (data.op === 'get') result = await GM.getValue(data.key);
+      else if (data.op === 'getMany') {
+        result = typeof GM.getValues === 'function' ? await GM.getValues(data.key)
+          : Object.fromEntries(await Promise.all(data.key.map(async (key) => [key, await GM.getValue(key)])));
+      }
       else if (data.op === 'set') { await GM.setValue(data.key, data.value); result = true; }
     } catch (e) {
       result = null;
@@ -42,14 +64,13 @@
   if (typeof GM.registerMenuCommand === 'function') {
     GM.registerMenuCommand('Toggle all banners', () => toggleSetting('showBanners', 'Banners'));
     GM.registerMenuCommand('Toggle "PreMod Active" startup banner', () => toggleSetting('showStartupBanner', 'Startup banner'));
-    GM.registerMenuCommand('Toggle reloading when a restored red stays hidden', () => toggleSetting('reloadCachedReds', 'Reload to restore'));
   }
 
   const inpageCode = `(() => { "use strict";
     if (document.documentElement.dataset.premodInjected === '1') return;
     document.documentElement.dataset.premodInjected = '1';
 
-    const settings = { showBanners: true, showStartupBanner: true, reloadCachedReds: true };
+    const settings = { showBanners: true, showStartupBanner: true };
     const pendingBridgeRequests = new Map();
 
     const bridge = (operation, key, value) => new Promise((resolve) => {
@@ -376,17 +397,16 @@
           const moderation = Array.isArray(responseData.moderation_results) ? responseData.moderation_results : [];
           const lookupIds = new Set([...slots.keys(), ...moderation.map(result => result.message_id).filter(Boolean)]);
           const savedText = new Map();
-          await Promise.all([...lookupIds].map(async (id) => {
-            const text = await bridge('get', 'msg_' + id);
+          const storedValues = await bridge('getMany', [...lookupIds].map(id => 'msg_' + id));
+          for (const id of lookupIds) {
+            const text = storedValues?.['msg_' + id];
             if (typeof text === 'string' && text) savedText.set(id, text);
-          }));
+          }
 
-          const restored = [];
           for (const [id, message] of slots) {
             if (savedText.has(id)) {
               console.debug('[PreMod] Convo history: Saved content found, restoring blocked message:', id);
               message.content = { ...(message.content || {}), content_type: 'text', parts: [savedText.get(id)] };
-              restored.push(id);
               modified = true;
             }
             // Unset is_visually_hidden_from_conversation
@@ -417,9 +437,6 @@
             });
           }
 
-          const historyConversationId = responseData.conversation_id || requestUrl.match(/\\/conversations?\\/([a-f0-9-]{36})/i)?.[1];
-          if (historyConversationId && restored.length) rememberRestored(historyConversationId, restored, responseData.current_node);
-
           if (modified) responseText = JSON.stringify(responseData);
         } catch (error) {
           console.warn('[PreMod] Convo history: Processing failed:', error);
@@ -435,72 +452,26 @@
       return apiResponse;
     };
 
-    // ===== Cached verdict recovery =====
-    // ChatGPT can show a conversation from its local cache and merge fresh moderation state
-    // into it, so a blocked verdict we removed from the response can survive and blank a
-    // message we restored. Loading with ?messageId= skips that cache, so if a restored
-    // message still shows the safety notice, reload through that route once.
-    const restoredByConversation = new Map(); // conversation_id -> { ids, currentNode, expires }
-    let recoveryTimer = null;
-    let recoveryStarted = false;
-
-    const rememberRestored = (conversationId, ids, currentNode) => {
-      const previous = restoredByConversation.get(conversationId);
-      restoredByConversation.set(conversationId, {
-        ids: new Set([...(previous?.ids || []), ...ids]),
-        currentNode: currentNode || previous?.currentNode,
-        expires: Date.now() + 30000
-      });
-      queueRecoveryCheck();
-    };
-
-    const queueRecoveryCheck = () => {
-      if (recoveryStarted || recoveryTimer !== null || !restoredByConversation.size) return;
-      recoveryTimer = setTimeout(() => {
-        recoveryTimer = null;
-        checkRecovery();
-      }, 750);
-    };
-
-    const checkRecovery = () => {
-      if (recoveryStarted || !settings.reloadCachedReds) return;
-      const url = new URL(location.href);
-      const conversationId = url.pathname.match(/\\/c\\/([a-f0-9-]{36})/i)?.[1];
-      const state = restoredByConversation.get(conversationId);
-      if (!state || state.expires < Date.now()) return;
-      // Respect explicit message links, including our own retry URL
-      if (url.searchParams.has('messageId') || url.searchParams.has('message')) return;
-
-      const stillBlocked = [];
-      for (const node of document.querySelectorAll('[data-chatgpt-selection-message-id]')) {
-        if (node.getAttribute('data-chatgpt-selection-conversation-id') !== conversationId) continue;
-        const id = node.getAttribute('data-chatgpt-selection-message-id');
-        if (!state.ids.has(id)) continue;
-        const notice = [...node.querySelectorAll('p')].some(p =>
-          /This content can[\\u2019']t be shown for safety reasons/i.test(p.textContent || ''));
-        if (notice) stillBlocked.push(id);
-      }
-      if (!stillBlocked.length) return;
-
-      // Guard against reload loops if the retry doesn't help
-      const guardKey = 'premod-recovery:' + conversationId;
-      try {
-        const lastAttempt = Number(sessionStorage.getItem(guardKey));
-        if (lastAttempt && Date.now() - lastAttempt < 30000) {
-          console.warn('[PreMod] Recovery: Already retried recently, not reloading again');
-          return;
+    // ===== History mode =====
+    // Keep the messageId history mode (see the top of the script) when the app opens
+    // another conversation. This only rewrites the URL; nothing reloads.
+    for (const method of ['pushState', 'replaceState']) {
+      const original = history[method];
+      history[method] = function (state, title, destination) {
+        let next = destination;
+        if (destination != null) {
+          try {
+            const url = new URL(destination, location.href);
+            if (url.origin === location.origin && /\\/c\\/[a-f0-9-]{36}\\/?$/i.test(url.pathname) &&
+                !url.searchParams.has('messageId') && !url.searchParams.has('message')) {
+              url.searchParams.set('messageId', '');
+              next = url.href;
+            }
+          } catch {}
         }
-        sessionStorage.setItem(guardKey, String(Date.now()));
-      } catch {}
-
-      recoveryStarted = true;
-      const id = stillBlocked.includes(state.currentNode) ? state.currentNode : stillBlocked[stillBlocked.length - 1];
-      url.searchParams.set('messageId', id);
-      console.debug('[PreMod] Recovery: Restored message still shows the safety notice, reloading past the cache:', id);
-      location.replace(url.href);
-    };
-
-    new MutationObserver(queueRecoveryCheck).observe(document.documentElement, { childList: true, subtree: true });
+        return original.call(this, state, title, next);
+      };
+    }
 
     // ===== WebSocket hook =====
     // Live turns now stream over ws.chatgpt.com via a "stream_handoff": the response
@@ -658,6 +629,7 @@
   };
 
   const waitForNonce = () => {
+    if (document.readyState !== 'loading' || isInjected()) return;
     const observer = new MutationObserver(() => {
       if (isInjected()) return observer.disconnect();
       const nonce = findNonce();
@@ -672,11 +644,13 @@
   const injectWithBlob = () => {
     const script = document.createElement('script');
     script.src = URL.createObjectURL(new Blob([inpageCode], { type: 'text/javascript' }));
-    document.documentElement.appendChild(script);
-    script.onload = () => {
+    const cleanup = () => {
       URL.revokeObjectURL(script.src);
       script.remove();
     };
+    script.onload = cleanup;
+    script.onerror = cleanup;
+    document.documentElement.appendChild(script);
   };
 
   const injectWithAddElement = async () => {
