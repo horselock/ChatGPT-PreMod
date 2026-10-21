@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.3.0
+// @version      2.4.0
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -42,13 +42,14 @@
   if (typeof GM.registerMenuCommand === 'function') {
     GM.registerMenuCommand('Toggle all banners', () => toggleSetting('showBanners', 'Banners'));
     GM.registerMenuCommand('Toggle "PreMod Active" startup banner', () => toggleSetting('showStartupBanner', 'Startup banner'));
+    GM.registerMenuCommand('Toggle reloading when a restored red stays hidden', () => toggleSetting('reloadCachedReds', 'Reload to restore'));
   }
 
   const inpageCode = `(() => { "use strict";
     if (document.documentElement.dataset.premodInjected === '1') return;
     document.documentElement.dataset.premodInjected = '1';
 
-    const settings = { showBanners: true, showStartupBanner: true };
+    const settings = { showBanners: true, showStartupBanner: true, reloadCachedReds: true };
     const pendingBridgeRequests = new Map();
 
     const bridge = (operation, key, value) => new Promise((resolve) => {
@@ -104,7 +105,7 @@
 
     window.addEventListener('message', messageListener);
 
-    const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36})?(?:\\?.*)?$/i;
+    const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36}(?:\\/messages)?)?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
 
     // Your message text is only sent on the POST that starts a turn. Stash it here (same
@@ -124,6 +125,119 @@
       } catch {}
     };
 
+    // Follows the messages a turn streams (snapshots, appends and patch ops) so a blocked
+    // one can be saved with its full text. Saves when the verdict arrives, then again
+    // whenever more text follows it. Used by both the fetch stream and the WebSocket.
+    const createCapture = (transport) => {
+      const messages = new Map(); // message_id -> { role, channel, text }
+      let activeId = null;
+      let lastPath = '';
+      let lastOperation = 'append';
+      let unassignedText = '';
+      const blockedIds = new Set();
+      const saved = new Map(); // message_id -> text last written
+      let saveQueue = Promise.resolve();
+
+      const rememberMessage = (message) => {
+        activeId = message.id;
+        lastPath = '';
+        lastOperation = 'append';
+        const previous = messages.get(activeId);
+        messages.set(activeId, {
+          role: message.author?.role || previous?.role,
+          channel: message.channel || previous?.channel,
+          text: Array.isArray(message.content?.parts)
+            ? message.content.parts.filter(part => typeof part === 'string').join('')
+            : (previous?.text || '')
+        });
+        // A full message snapshot supersedes any text we couldn't attribute yet
+        unassignedText = '';
+      };
+
+      const captureOperation = (op) => {
+        if (!op || typeof op !== 'object') return;
+        // Deltas omit p and o when they repeat the previous op's
+        const path = typeof op.p === 'string' ? op.p : lastPath;
+        const operation = op.o || lastOperation;
+        lastPath = path;
+        lastOperation = operation;
+        if (op.v?.message?.id) return rememberMessage(op.v.message);
+        if (path === '/message' && op.v?.id) return rememberMessage(op.v);
+        const state = messages.get(activeId);
+        if (path === '/message/channel' && state) { state.channel = op.v; return; }
+        if (path === '/message/author/role' && state) { state.role = op.v; return; }
+        // Metadata, status and tool updates must not become response text
+        if (path && !/^\\/message\\/content(?:\\/parts(?:\\/\\d+)?)?$/.test(path)) return;
+        if (operation === 'patch' && Array.isArray(op.v)) {
+          for (const child of op.v) captureOperation(child);
+          return;
+        }
+        let text;
+        if (typeof op.v === 'string') text = op.v;
+        else if (Array.isArray(op.v) && path === '/message/content/parts') text = op.v.filter(part => typeof part === 'string').join('');
+        else if (Array.isArray(op.v?.parts)) text = op.v.parts.filter(part => typeof part === 'string').join('');
+        if (text === undefined) return;
+        if (operation !== 'append' && operation !== 'replace' && operation !== 'add') return;
+        if (state) {
+          if (state.role && state.role !== 'assistant') return;
+          if (state.channel && state.channel !== 'final') return;
+          state.text = operation === 'append' ? state.text + text : text;
+        } else {
+          unassignedText = operation === 'append' ? unassignedText + text : text;
+        }
+      };
+
+      const capturePayload = (payload) => {
+        if (payload.message?.id) rememberMessage(payload.message);
+        if (payload.v?.message?.id) rememberMessage(payload.v.message);
+        else if (Array.isArray(payload.v)) for (const op of payload.v) captureOperation(op);
+        else if (Object.prototype.hasOwnProperty.call(payload, 'v')) captureOperation(payload);
+      };
+
+      const markBlocked = (id) => {
+        if (!id) return;
+        blockedIds.add(id);
+        const isInput = pendingInputs.has(id);
+        // A verdict for a message we never saw a snapshot of claims the text streamed so far
+        if (!isInput && !messages.has(id) && (unassignedText || !activeId)) {
+          messages.set(id, { role: 'assistant', channel: 'final', text: unassignedText });
+          activeId = id;
+          unassignedText = '';
+        }
+        console.debug('[PreMod] ' + transport + ': Detected blocked ' + (isInput ? 'input' : 'response') + ':', id);
+        if (isInput) showBanner('REQUEST RED. Be careful!', '#c53030', 5000);
+      };
+
+      const persistBlocked = async () => {
+        for (const id of blockedIds) {
+          const isInput = pendingInputs.has(id);
+          const text = isInput ? pendingInputs.get(id) : messages.get(id)?.text;
+          if (!text || saved.get(id) === text) continue;
+          if (await bridge('set', 'msg_' + id, text) !== true) {
+            console.warn('[PreMod] ' + transport + ': Could not save blocked message:', id);
+            continue;
+          }
+          if (!saved.has(id) && !isInput) showBanner('Response red, saved it for you =)', '#dd6b20');
+          saved.set(id, text);
+          console.debug('[PreMod] ' + transport + ': Saved blocked ' + (isInput ? 'input' : 'response') + ':', id, 'characters:', text.length);
+        }
+      };
+
+      // Queued so an earlier, shorter snapshot can't overwrite newer text
+      const persist = () => {
+        if (blockedIds.size) saveQueue = saveQueue.then(persistBlocked);
+        return saveQueue;
+      };
+
+      const warnUnsaved = () => {
+        for (const id of blockedIds) {
+          if (!saved.has(id)) console.warn('[PreMod] ' + transport + ': No text captured for blocked message:', id);
+        }
+      };
+
+      return { capturePayload, markBlocked, persist, warnUnsaved };
+    };
+
     const originalFetch = fetch;
     fetch = async function(...args) {
       const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
@@ -135,94 +249,89 @@
       const apiResponse = await originalFetch.apply(this, args);
       const contentType = (apiResponse.headers.get('content-type') || '').toLowerCase();
 
-      if (contentType.includes('text/event-stream')) {
-        let currentMessageId = null;
-        let accumulatedContent = '';
+      if (contentType.includes('text/event-stream') && apiResponse.body) {
+        const capture = createCapture('Stream');
 
+        // Rewrite one complete SSE event; null drops it
+        const processEvent = (rawEvent) => {
+          const lines = rawEvent.split(/\\r?\\n/);
+          const dataLines = lines.filter(line => line.startsWith('data:'));
+          if (!dataLines.length) return rawEvent;
+          const data = dataLines.map(line => line.slice(5).replace(/^ /, '')).join('\\n');
+          if (data.trim() === '[DONE]') return rawEvent;
+          let payload;
+          try { payload = JSON.parse(data); } catch { return rawEvent; }
+          if (!payload || typeof payload !== 'object') return rawEvent;
+          capture.capturePayload(payload);
+          let changed = false;
+
+          // Check for blocked messages FIRST before filtering anything
+          if (unblockFlagged(payload.moderation_response)) {
+            capture.markBlocked(payload.message_id);
+            changed = true;
+          }
+
+          // Filter out type: "moderation" chunks (AFTER checking for blocked)
+          if (payload.type === 'moderation') {
+            console.debug('[PreMod] Filtered out moderation chunk:', payload);
+            return null;
+          }
+
+          // Filter out is_visually_hidden_from_conversation delta (AFTER checking for blocked)
+          if (Array.isArray(payload.v)) {
+            const filtered = payload.v.filter(op => !op?.p?.includes('is_visually_hidden_from_conversation'));
+            if (filtered.length < payload.v.length) {
+              console.debug('[PreMod] Filtered out visibility hide op from delta:', payload);
+              showBanner('Safety disclaimer bypassed', "#48bb78", 3000);
+              if (filtered.length === 0) return null;
+              payload.v = filtered;
+              changed = true;
+            }
+          }
+
+          if (!changed) return rawEvent;
+          return lines.filter(line => !line.startsWith('data:')).concat('data: ' + JSON.stringify(payload)).join('\\n');
+        };
+
+        const reader = apiResponse.body.getReader();
         const modifiedStream = new ReadableStream({
           async start(controller) {
-            const reader = apiResponse.body.getReader();
             const decoder = new TextDecoder();
             const encoder = new TextEncoder();
+            // Network chunks can split an event, so only process complete ones
+            let buffer = '';
+            const flushEvents = async (atEnd = false) => {
+              let boundary;
+              while ((boundary = /\\r?\\n\\r?\\n/.exec(buffer))) {
+                const rewritten = processEvent(buffer.slice(0, boundary.index));
+                buffer = buffer.slice(boundary.index + boundary[0].length);
+                if (rewritten !== null) controller.enqueue(encoder.encode(rewritten + '\\n\\n'));
+              }
+              if (atEnd && buffer) {
+                const rewritten = processEvent(buffer);
+                buffer = '';
+                if (rewritten !== null) controller.enqueue(encoder.encode(rewritten + '\\n\\n'));
+              }
+              await capture.persist();
+            };
 
             try {
               while (true) {
                 const { done, value } = await reader.read();
-                if (done) {
-                  if (currentMessageId && accumulatedContent) {
-                    await bridge('set', 'msg_' + currentMessageId, accumulatedContent);
-                  }
-                  controller.close();
-                  break;
-                }
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\\n').map(line => {
-                  if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                    let jsonString = line.slice(6).trim();
-                    try {
-                      const payload = JSON.parse(jsonString);
-
-                      // Check for blocked messages FIRST before filtering anything
-                      if (unblockFlagged(payload.moderation_response)) {
-                        console.debug('[PreMod] Stream: Detected blocked=true, unblocking:', payload.message_id);
-                        if (!currentMessageId) {
-                          currentMessageId = payload.message_id;
-                          const requestBody = JSON.parse(args[1].body);
-                          if (requestBody.messages && currentMessageId === requestBody.messages[0].id) {
-                            accumulatedContent = requestBody.messages[0].content.parts[0];
-                            console.debug('[PreMod] Stream: Input message blocked');
-                            showBanner("REQUEST RED. Be careful!", "#c53030", 5000);
-                          } else {
-                            console.debug('[PreMod] Stream: Response blocked');
-                            showBanner("Response red, saved it for you =)", "#dd6b20");
-                          }
-                        }
-                        jsonString = JSON.stringify(payload);
-                      }
-
-                      // Filter out type: "moderation" chunks (AFTER checking for blocked)
-                      if (payload.type === 'moderation') {
-                        console.debug('[PreMod] Filtered out moderation chunk:', payload);
-                        return '';
-                      }
-
-                      // Filter out is_visually_hidden_from_conversation delta (AFTER checking for blocked)
-                      if (Array.isArray(payload.v)) {
-                        const filtered = payload.v.filter(op => !op?.p?.includes('is_visually_hidden_from_conversation'));
-                        if (filtered.length < payload.v.length) {
-                          console.debug('[PreMod] Filtered out visibility hide op from delta:', payload);
-                          showBanner('Safety disclaimer bypassed', "#48bb78", 3000);
-                          if (filtered.length === 0) return '';
-                          payload.v = filtered;
-                          jsonString = JSON.stringify(payload);
-                        }
-                      }
-
-                      const content = payload.v;
-                      if (content && !currentMessageId) {
-                        if (typeof content === 'string') {
-                          accumulatedContent += content;
-                        } else if (Array.isArray(content)) {
-                          for (const chunk of content) {
-                            if (chunk?.o === 'append' && typeof chunk.v === 'string') {
-                              accumulatedContent += chunk.v;
-                            }
-                          }
-                        }
-                      }
-                    } catch {}
-                    return 'data: ' + jsonString;
-                  }
-                  return line;
-                });
-
-                controller.enqueue(encoder.encode(lines.join('\\n')));
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                await flushEvents();
               }
+              buffer += decoder.decode();
+              await flushEvents(true);
+              capture.warnUnsaved();
+              controller.close();
             } catch (error) {
+              await capture.persist();
               controller.error(error);
             }
-          }
+          },
+          cancel(reason) { return reader.cancel(reason); }
         });
 
         return new Response(modifiedStream, {
@@ -238,50 +347,83 @@
           const responseData = JSON.parse(responseText);
           let modified = false;
 
-          // Unset is_visually_hidden_from_conversation in mapping
-          if (responseData.mapping) {
-            for (const uuid in responseData.mapping) {
-              const msg = responseData.mapping[uuid];
-              if (msg?.message?.metadata?.is_visually_hidden_from_conversation &&
-                  msg?.message?.author?.role === 'assistant') {
-                console.debug('[PreMod] Convo history: Unhiding message:', uuid);
-                msg.message.metadata.is_visually_hidden_from_conversation = false;
-                modified = true;
+          // Full loads key messages by node under "mapping"; paginated loads
+          // (/conversations/<id>/messages) list them under "messages", bare or in node wrappers.
+          const slots = new Map(); // message_id -> message
+          const addSlot = (message, fallbackId) => {
+            if (!message || typeof message !== 'object') return;
+            const id = message.id || fallbackId;
+            if (typeof id === 'string' && !slots.has(id)) slots.set(id, message);
+          };
+          for (const [nodeId, node] of Object.entries(responseData.mapping || {})) addSlot(node?.message, nodeId);
+          const walkMessages = (value, fallbackId) => {
+            if (!value || typeof value !== 'object') return;
+            if (Array.isArray(value)) {
+              for (const item of value) walkMessages(item);
+            } else if (value.message && typeof value.message === 'object') {
+              addSlot(value.message, value.id || fallbackId);
+            } else if ((value.id || fallbackId) && (value.author || value.content)) {
+              addSlot(value, fallbackId);
+            } else {
+              for (const [key, child] of Object.entries(value)) {
+                if (key !== 'metadata' && key !== 'content') walkMessages(child, key);
               }
+            }
+          };
+          walkMessages(responseData.messages);
+
+          // Verdicts can cover older messages that only arrive on a later page; look those up too
+          const moderation = Array.isArray(responseData.moderation_results) ? responseData.moderation_results : [];
+          const lookupIds = new Set([...slots.keys(), ...moderation.map(result => result.message_id).filter(Boolean)]);
+          const savedText = new Map();
+          await Promise.all([...lookupIds].map(async (id) => {
+            const text = await bridge('get', 'msg_' + id);
+            if (typeof text === 'string' && text) savedText.set(id, text);
+          }));
+
+          const restored = [];
+          for (const [id, message] of slots) {
+            if (savedText.has(id)) {
+              console.debug('[PreMod] Convo history: Saved content found, restoring blocked message:', id);
+              message.content = { ...(message.content || {}), content_type: 'text', parts: [savedText.get(id)] };
+              restored.push(id);
+              modified = true;
+            }
+            // Unset is_visually_hidden_from_conversation
+            if (message.metadata?.is_visually_hidden_from_conversation && message.author?.role === 'assistant') {
+              console.debug('[PreMod] Convo history: Unhiding message:', id);
+              message.metadata.is_visually_hidden_from_conversation = false;
+              modified = true;
             }
           }
 
-          if (Array.isArray(responseData.moderation_results)) {
-            for (const result of responseData.moderation_results) {
+          if (moderation.length) {
+            responseData.moderation_results = moderation.filter((result) => {
+              // Drop the whole verdict for anything we have text for, even if its message is on
+              // a page not loaded yet; any leftover verdict field can still blank the message.
+              if (savedText.has(result.message_id)) {
+                modified = true;
+                return false;
+              }
               // Filter out safety disclaimers
               if (Array.isArray(result.disclaimers) && result.disclaimers.length > 0) {
                 console.debug('[PreMod] Convo history: Removed disclaimer(s)');
                 result.disclaimers = [];
                 modified = true;
               }
-
-              // Only unblock if we actually have the saved content to put back. Otherwise
-              // leave it blocked - an unblocked-but-empty message breaks the UI (can't scroll).
-              if (result.blocked && result.message_id) {
-                const storedContent = await bridge('get', 'msg_' + result.message_id);
-                const messageNode = responseData.mapping?.[result.message_id]?.message;
-                if (!storedContent) {
-                  console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
-                } else if (!messageNode?.content) {
-                  console.debug('[PreMod] Convo history: Saved content found, but message not in response, leaving blocked:', result.message_id, 'response keys:', Object.keys(responseData), 'mapping nodes:', Object.keys(responseData.mapping || {}).length);
-                } else {
-                  console.debug('[PreMod] Convo history: Saved content found, restoring blocked message:', result.message_id);
-                  messageNode.content.parts = [storedContent];
-                  messageNode.content.content_type = 'text';
-                  result.blocked = false;
-                  modified = true;
-                }
-              }
-            }
+              // Leave it blocked without saved text - an unblocked-but-empty message breaks the UI (can't scroll)
+              if (result.blocked) console.debug('[PreMod] Convo history: No saved content, leaving blocked:', result.message_id);
+              return true;
+            });
           }
 
+          const historyConversationId = responseData.conversation_id || requestUrl.match(/\\/conversations?\\/([a-f0-9-]{36})/i)?.[1];
+          if (historyConversationId && restored.length) rememberRestored(historyConversationId, restored, responseData.current_node);
+
           if (modified) responseText = JSON.stringify(responseData);
-        } catch {}
+        } catch (error) {
+          console.warn('[PreMod] Convo history: Processing failed:', error);
+        }
 
         return new Response(responseText, {
           headers: apiResponse.headers,
@@ -293,55 +435,108 @@
       return apiResponse;
     };
 
+    // ===== Cached verdict recovery =====
+    // ChatGPT can show a conversation from its local cache and merge fresh moderation state
+    // into it, so a blocked verdict we removed from the response can survive and blank a
+    // message we restored. Loading with ?messageId= skips that cache, so if a restored
+    // message still shows the safety notice, reload through that route once.
+    const restoredByConversation = new Map(); // conversation_id -> { ids, currentNode, expires }
+    let recoveryTimer = null;
+    let recoveryStarted = false;
+
+    const rememberRestored = (conversationId, ids, currentNode) => {
+      const previous = restoredByConversation.get(conversationId);
+      restoredByConversation.set(conversationId, {
+        ids: new Set([...(previous?.ids || []), ...ids]),
+        currentNode: currentNode || previous?.currentNode,
+        expires: Date.now() + 30000
+      });
+      queueRecoveryCheck();
+    };
+
+    const queueRecoveryCheck = () => {
+      if (recoveryStarted || recoveryTimer !== null || !restoredByConversation.size) return;
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = null;
+        checkRecovery();
+      }, 750);
+    };
+
+    const checkRecovery = () => {
+      if (recoveryStarted || !settings.reloadCachedReds) return;
+      const url = new URL(location.href);
+      const conversationId = url.pathname.match(/\\/c\\/([a-f0-9-]{36})/i)?.[1];
+      const state = restoredByConversation.get(conversationId);
+      if (!state || state.expires < Date.now()) return;
+      // Respect explicit message links, including our own retry URL
+      if (url.searchParams.has('messageId') || url.searchParams.has('message')) return;
+
+      const stillBlocked = [];
+      for (const node of document.querySelectorAll('[data-chatgpt-selection-message-id]')) {
+        if (node.getAttribute('data-chatgpt-selection-conversation-id') !== conversationId) continue;
+        const id = node.getAttribute('data-chatgpt-selection-message-id');
+        if (!state.ids.has(id)) continue;
+        const notice = [...node.querySelectorAll('p')].some(p =>
+          /This content can[\\u2019']t be shown for safety reasons/i.test(p.textContent || ''));
+        if (notice) stillBlocked.push(id);
+      }
+      if (!stillBlocked.length) return;
+
+      // Guard against reload loops if the retry doesn't help
+      const guardKey = 'premod-recovery:' + conversationId;
+      try {
+        const lastAttempt = Number(sessionStorage.getItem(guardKey));
+        if (lastAttempt && Date.now() - lastAttempt < 30000) {
+          console.warn('[PreMod] Recovery: Already retried recently, not reloading again');
+          return;
+        }
+        sessionStorage.setItem(guardKey, String(Date.now()));
+      } catch {}
+
+      recoveryStarted = true;
+      const id = stillBlocked.includes(state.currentNode) ? state.currentNode : stillBlocked[stillBlocked.length - 1];
+      url.searchParams.set('messageId', id);
+      console.debug('[PreMod] Recovery: Restored message still shows the safety notice, reloading past the cache:', id);
+      location.replace(url.href);
+    };
+
+    new MutationObserver(queueRecoveryCheck).observe(document.documentElement, { childList: true, subtree: true });
+
     // ===== WebSocket hook =====
     // Live turns now stream over ws.chatgpt.com via a "stream_handoff": the response
     // and its moderation verdict arrive as WS frames whose "encoded_item" is the exact
     // old SSE text. The fetch hook above never sees them, so we intercept here too.
     const TURN_TOPIC_PREFIX = 'conversation-turn-';
-    const wsTurnState = new Map(); // topic_id -> per-turn accumulation
+    const wsTurnState = new Map(); // topic_id -> per-turn capture
 
     const getWsState = (topicId) => {
       let state = wsTurnState.get(topicId);
       if (!state) {
         if (wsTurnState.size > 100) wsTurnState.clear(); // crude leak guard over a long session
-        state = { accumulatedContent: '', sawFinal: false };
+        state = createCapture('WS');
         wsTurnState.set(topicId, state);
       }
       return state;
     };
 
-    // Process one unwrapped SSE "encoded_item". Mutates state (saves content), and returns
-    // rewritten text if it stripped anything, otherwise null (leave the frame untouched).
-    const processEncodedItem = (text, state) => {
+    // Process one unwrapped SSE "encoded_item". Captures text and saves blocked messages, and
+    // returns rewritten text if it changed anything, otherwise null (leave the frame untouched).
+    const processEncodedItem = (text, capture) => {
       const lines = text.split('\\n');
       let touched = false;
       const kept = [];
-      for (const line of lines) {
+      for (let line of lines) {
         if (!line.startsWith('data: ') || line === 'data: [DONE]') { kept.push(line); continue; }
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
+        capture.capturePayload(payload);
 
-        // Once the visible ("final") assistant message is added, start accumulating its text
-        if (payload.v && payload.v.message && payload.v.message.channel === 'final') {
-          state.sawFinal = true;
-          try {
-            const parts = payload.v.message.content.parts;
-            if (Array.isArray(parts) && typeof parts[0] === 'string') state.accumulatedContent = parts[0];
-          } catch {}
-        }
-
-        // Block verdict: save the real content (input echo, or accumulated response) then drop the cue.
-        // Handled per message_id so a double-red saves both the request and the response.
-        if (payload.moderation_response && payload.moderation_response.blocked) {
-          const blockedId = payload.message_id;
-          const inputContent = blockedId ? pendingInputs.get(blockedId) : undefined;
-          const isInput = inputContent !== undefined;
-          const content = isInput ? inputContent : state.accumulatedContent;
-          if (blockedId && content) {
-            bridge('set', 'msg_' + blockedId, content);
-            console.debug('[PreMod] WS: Saved blocked ' + (isInput ? 'input' : 'response') + ':', blockedId);
-          }
-          showBanner(isInput ? 'REQUEST RED. Be careful!' : 'Response red, saved it for you =)', isInput ? '#c53030' : '#dd6b20', isInput ? 5000 : 2000);
+        // Block verdict: handled per message_id so a double-red saves both the request and the response.
+        // A verdict can also ride on events other than standalone moderation ones, so rewrite those.
+        if (unblockFlagged(payload.moderation_response)) {
+          capture.markBlocked(payload.message_id);
+          touched = true;
+          line = 'data: ' + JSON.stringify(payload);
         }
 
         // Drop standalone moderation events entirely (no red flash)
@@ -359,11 +554,9 @@
           }
         }
 
-        // Accumulate streamed response text (bare-string appends after the final message appears)
-        if (state.sawFinal && typeof payload.v === 'string') state.accumulatedContent += payload.v;
-
         kept.push(line);
       }
+      capture.persist();
       return touched ? kept.join('\\n') : null;
     };
 
