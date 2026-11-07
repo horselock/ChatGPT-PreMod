@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT PreMod
 // @namespace    HORSELOCK.chatgpt
-// @version      2.4.1
+// @version      2.4.2
 // @description  Hides moderation visual effects. Prevents deletion of streaming response (fetch + WebSocket stream-handoff). Saves responses to GM storage and injects them into loaded conversations based on message ID.
 // @match        *://chatgpt.com/*
 // @match        *://chat.openai.com/*
@@ -128,6 +128,20 @@
 
     const apiUrlPattern = /\\/backend-api\\/(?:f\\/)?conversations?(?:\\/[a-f0-9-]{36}(?:\\/messages)?)?(?:\\?.*)?$/i;
     const unblockFlagged = (moderationObj) => moderationObj?.blocked && (moderationObj.blocked = false, true);
+
+    // ChatGPT now starts the visible reply with is_visually_hidden_from_conversation: true and
+    // reveals it with a later "remove" op. Only strip ops that hide; never the one that reveals.
+    const HIDDEN_FLAG = 'is_visually_hidden_from_conversation';
+    const isHideOp = (op) => !!op?.p?.includes(HIDDEN_FLAG) && op.o !== 'remove' && !!op.v;
+    // Reveal a reply that arrives already hidden, in case the reveal op never comes (e.g. a red)
+    const unhideSnapshot = (payload) => {
+      const message = payload?.v?.message;
+      if (message?.metadata?.[HIDDEN_FLAG] && message.author?.role === 'assistant') {
+        message.metadata[HIDDEN_FLAG] = false;
+        return true;
+      }
+      return false;
+    };
 
     // Your message text is only sent on the POST that starts a turn. Stash it here (same
     // source the old fetch path read from args[1].body) so the WebSocket hook can restore
@@ -284,7 +298,7 @@
           try { payload = JSON.parse(data); } catch { return rawEvent; }
           if (!payload || typeof payload !== 'object') return rawEvent;
           capture.capturePayload(payload);
-          let changed = false;
+          let changed = unhideSnapshot(payload);
 
           // Check for blocked messages FIRST before filtering anything
           if (unblockFlagged(payload.moderation_response)) {
@@ -300,7 +314,7 @@
 
           // Filter out is_visually_hidden_from_conversation delta (AFTER checking for blocked)
           if (Array.isArray(payload.v)) {
-            const filtered = payload.v.filter(op => !op?.p?.includes('is_visually_hidden_from_conversation'));
+            const filtered = payload.v.filter(op => !isHideOp(op));
             if (filtered.length < payload.v.length) {
               console.debug('[PreMod] Filtered out visibility hide op from delta:', payload);
               showBanner('Safety disclaimer bypassed', "#48bb78", 3000);
@@ -501,6 +515,7 @@
         let payload;
         try { payload = JSON.parse(line.slice(6)); } catch { kept.push(line); continue; }
         capture.capturePayload(payload);
+        if (unhideSnapshot(payload)) { touched = true; line = 'data: ' + JSON.stringify(payload); }
 
         // Block verdict: handled per message_id so a double-red saves both the request and the response.
         // A verdict can also ride on events other than standalone moderation ones, so rewrite those.
@@ -515,7 +530,7 @@
 
         // Strip visibility-hide ops (safety disclaimers) from delta arrays
         if (Array.isArray(payload.v)) {
-          const filtered = payload.v.filter((op) => !(op && op.p && op.p.includes('is_visually_hidden_from_conversation')));
+          const filtered = payload.v.filter((op) => !isHideOp(op));
           if (filtered.length < payload.v.length) {
             touched = true;
             showBanner('Safety disclaimer bypassed', '#48bb78', 3000);
